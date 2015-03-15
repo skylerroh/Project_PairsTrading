@@ -1,0 +1,161 @@
+<html>
+
+<head>
+<title>Skyler Roh - Pairs Trading Simulation Study</title>
+</head>
+
+<body>
+
+<h1>Pairs Trading Simulation Study</h1>
+
+<h2>Introduction</h2>
+
+<p>
+The economy revolves around finance and financial trading. To maximize profits in buying and selling stock, it is vital to have algorithms and models to predict opportunities and strategies to implement at such moments. Pairs trading is one such method that attempts to automate such a process. Its implementation on tens of thousands simulated time series exhibits that it is most effective when dependence between two stocks is high. 
+</p>
+
+<h2>Background</h2>
+
+<p>
+Pairs trading is a early model of stock trading that was at the peak of use in the 80s. It established that the ratio of stock prices of similar companies tends to stay consistent. Variations from the mean are then opportunities for profit since the model predicts that the direction of the ratio will tend back towards the mean. Past historical data for the two companies is used to establish the magnitude of variation at which to buy and sell.  
+</p>
+
+<h2>Empirical Study</h2>
+
+<p>
+To test the functionality of the pairs trading model created, I compared six pairs of stocks from companies of similar industries. The two companies that are compared need to be of the same industry in order to reasonably make the assumption that the ratio of their stock prices will converge to a central value.   
+</p>
+<p>
+One of the notable trends was that stocks that have mean ratios far from 1 (Hotels - Hilton and Hyatt) tend to low profit margins compared to stocks of similar value, i.e. ratio ~ 1 (Airlines - Southwest and United). Additionally, stocks with few positions, but peaks of high magnitude, showed greater profits than those with more positions but less deviation (Industry vs Cars).
+*all calculated profits are based on $1 worth of stock bought and sold at each opening position*
+</p>
+
+<!--begin.rcode echo=FALSE 
+setwd("/Users/Skyroh/Documents/Stat 133/Project_PairsTrading")
+load(file = "simResultsAll.rda")
+end.rcode-->
+
+<p>
+--- Difference in ratio mean
+</p>
+<!--begin.rcode fig.width=10, fig.height=5, echo=FALSE 
+layout(matrix(c(1, 2), 1, 2, byrow = TRUE), 
+       widths = c(.5, .5), heights = c(.5, .5))
+
+plotRatio(HotelHH$Ratio, k = k.star3)
+title(main = "Hilton and Hyatt - Hotels\
+      Profit = 0.330, k = 1.318")
+for (i in 1:length(positions3)){
+  showPosition(pos = positions3[[i]], ratios = HotelHH$Ratio[positions3[[i]]], radius = 4)
+}
+
+plotRatio(Airline$Ratio, k = k.star2)
+title(main = "Southwest and United - Airlines\
+      Profit = 4.188, k = 2.314")
+for (i in 1:length(positions2)){
+  showPosition(pos = positions2[[i]], ratios = Airline$Ratio[positions2[[i]]], radius = 30)
+}
+end.rcode-->
+<p>
+ 
+<p/>
+<p>
+--- Difference in deviation from mean, frequency and magnitude
+</p>
+<!--begin.rcode fig.width= 10, fig.height=5, echo=FALSE 
+layout(matrix(c(1, 2), 1, 2, byrow = TRUE), 
+       widths = c(.5, .5), heights = c(.5, .5))
+plotRatio(Car$Ratio, k = k.star4)
+title(main = "Ford and GM - Cars\
+      Profit = 1.346, k = 1.000")
+for (i in 1:length(positions4)){
+  showPosition(pos = positions4[[i]], ratios = Car$Ratio[positions4[[i]]], radius = 10)
+}
+
+plotRatio(Industry$Ratio, k = k.star6)
+title(main = "Alcoa and Boeing - Industry/Metals\
+      Profit = 5.049, k = 1.906")
+for (i in 1:length(positions6)){
+  showPosition(pos = positions6[[i]], ratios = Industry$Ratio[positions6[[i]]], radius = 125)
+}
+end.rcode-->
+
+<h2>Simulation Study</h2>
+
+<p>
+Similulations of hypothetical time series were created based on 8 parameters: rho, psi, 2 beta0's, 2 beta1's, and sigma. Each of 300 parameter combinations were used to find a distribution of the profits of 100 time series each of which had 4000 values. 
+  To determine approximate parameter values to iterate over, I ran and plotted a few simulations varying each term to get a sense of the effect that each has on the ratio of the stock values, as well as which values are reasonable for simulation. Through this process, the observed effects of each parameter are: rho is inversely proportional to the amount of times the ratio fluctuates and thus increases the frequncy of buy/sell positions, psi is inversely proportional to the sd of the ratio and thus keeps our stocks from deviating to far from the mean, beta1 is proportional to the variance of the corresponding stock, and sigma is the amount of variation introduced when creating the stock values.
+</p>
+<p>
+  After iterating through 300 variations* of parameters for the time series simulation, there is an apparent pattern to the mean values of the resulting profits. First, I sorted the 300 distributions by the rho value that was used to create them from .95 to .99 (60 each) and then took the mean value for set of distribution means. As rho decreases in value, the mean profit tends to increase (see values below) (rho = .99 shows a higher value than expected, probably due to variation in simulation). 
+</p>
+<p>
+  After identifying the trend in rho and looking inside a particular value of rho, there again are aparent trends for each of the parameter values. Separating by value of psi shows a notable pattern (see example below for rho = .97) which shifts slightly higher in profit for psi = 0 to .8.
+</p>
+<p>
+  Finally, going into each psi value, one can see that higher profits are observed when the values for beta1 are not equal, and higher variation sigma for the randomness introduced in our time series. The difference in beta1 is indicative of a pair of stocks for which one has more day to day fluctuation while the other is more consistent which produces a higher profit in our pairs trading model.
+</p>
+<p>
+  Seeing these trends, the optimal parameters for the pairs trading model to maximize profit are lower rho, higher psi, differing beta1's, and higher sigma within the range of reasonable values for each.
+</p>
+<p>
+*Rho (.95, .96, .97, .97, .99)
+*Psi (0, .2, .4, .6, .8)
+*beta1.1 (0, 0.05)
+*beta1.2 (0, 0.05)
+*sigma (.5, 1, 1.5)
+</p>
+
+<!--begin.rcode echo=FALSE 
+data.frame(Rho =c(.95, .96, .97, .98, .99), 
+           ProfitMeans = c(mean_100_95, mean_100_96, 
+                           mean_100_97, mean_100_98, 
+                           mean_100_99))
+end.rcode-->
+
+<!--begin.rcode fig.width=8, fig.height=5, echo=FALSE
+library(RColorBrewer)
+myColors = c("red", "goldenrod", "darkgreen", "blue")
+beta1.1 = simResultsRef$Var2
+beta1.1Factors = factor(beta1.1, levels = c(0, .05), labels = c("0", ".05"))
+beta1.2 = simResultsRef$Var3
+beta1.2Factors = factor(beta1.2, levels = c(0, .05), labels = c("0", ".05"))
+betaNumerics = as.numeric(beta1.1Factors) + 2 * as.numeric(beta1.2Factors)
+betaColors = myColors[betaNumerics - 2]
+
+plot(mean97, xlab = "Index of Distribution", ylab = "Profit mean", ylim = c(0, 10.5), main = "Rho = .97", col = betaColors)
+abline(v = 0.5 + seq(2, by = 12, length = 4), lty = "dashed", col = "green", lwd = 1)
+mtext(text = "Psi = 0", 
+      side = 3, line = .5, at = 6.5, adj = .5, cex = .8)
+mtext(text = "Psi = .2", 
+      side = 3, line = .5, at = 18.5, adj = .5, cex = .8)
+mtext(text = "Psi = .4", 
+      side = 3, line = .5, at = 30.5, adj = .5, cex = .8)
+mtext(text = "Psi = .6", 
+      side = 3, line = .5, at = 42.5, adj = .5, cex = .8)
+mtext(text = "Psi = .8", 
+      side = 3, line = .5, at = 54.5, adj = .5, cex = .8)
+legend("topleft", fill = myColors, legend = c("0, 0", "0, 0.05", "0.05, 0", "0.05, 0.05"),
+       title = "Beta1", cex = 0.9)
+end.rcode-->
+
+<h2>Discussion</h2>
+
+<p>
+  A primary factor that this model of pairs trading does not take into consideration when calculating profit is the cost of buying and selling. This model predicts higher profit for lower rho values (more buy/sell positions); however, this might be suboptimal as the cost of buying/selling multiple times adds up. 
+</p>
+<p>
+  Additionally, our time series simulations assumed a great amount of dependence between the two stocks that keeps the ratio of the two stock prices around a central value, and that such dependence will be consistent from past to present. Although this may be reasonable for pairs of companies in the same industry for most time periods, instances in which deviation from this pattern exist, e.g. one company coming out with a great innovation, could result in a great amount of profit loss. Relevant information about the potential for such instances needs to be introduced in order to implement pairs trading effectively. 
+</p>
+<p>
+  Lastly, time constraints and computing power limited the number of test cases and simulations that could be performed. The test was performed assuming that one observes the stock values only once a day, an assumption that misses many profit opportunities if used in the actual stock market. 
+</p>
+
+<h2>Conclusions</h2>
+
+<p>
+The model of pairs trading excels when the two stocks under examination exhibit a great dependence on one another. The dependence of the two companies effects the number of buy and sell opportunities, which correspond to opportunities to profit, and possibly more importantly, prevent much possibility for loss. 
+</p>
+
+</body>
+</html>
