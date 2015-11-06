@@ -1,0 +1,2561 @@
+1+1
+readData = function(fileName, dateFormat = "%m/%d/%y"){#
+  stockData = read.csv(fileName, stringsAsFactors = FALSE)#
+  stockData$Date = as.Date(stockData$Date, dateFormat)#
+  stockData = stockData[order(stockData$Date), ]#
+  return(stockData[ , c("Date", "Adj.Close") ])#
+}#
+#
+combine2stocks = function(stockA, stockB){#
+  stockA = stockA[stockA$Date %in% stockB$Date, ]#
+  stockB = stockB[stockB$Date %in% stockA$Date, ]#
+  stockAB = data.frame(Date = stockA$Date, #
+                       Adj.Close.A = stockA$Adj.Close, #
+                       Adj.Close.B = stockB$Adj.Close, #
+                       Ratio = stockA$Adj.Close / stockB$Adj.Close)#
+  return (stockAB)#
+}#
+#
+plotRatio = function(ratio, k = 1, date = seq(along = ratio), ...){#
+  plot(ratio ~ date, type = "l", xlab = "Date", ylab = "Ratio")#
+  abline(h = mean(ratio), lty = "dashed", col = "green")#
+  abline(h = mean(ratio) - (c(-k, k) * sd(ratio)), lty = "dashed", col = "red")#
+}#
+#
+showPosition = function(pos, ratios, col = c("green", "red"), radius = 100){#
+  symbols(x = pos, y = ratios, circles = rep(radius, times = length(pos)), #
+          fg = col, inches = FALSE, add = TRUE)#
+}#
+#
+findNextPosition = function(ratio, startDay, k = 1, m = mean(ratio), s = sd(ratio)){#
+  possibleOpen = which(abs(ratio - mean(ratio)) >= k * s)#
+  if (length(possibleOpen[possibleOpen >= startDay]) == 0) {#
+    return (integer())#
+  } else {#
+    openPosition = possibleOpen[possibleOpen >= startDay][1]#
+  }#
+  if (ratio[openPosition] >= m + k * s) {#
+    possibleClose = which(ratio <= mean(ratio))#
+    if (length(possibleClose[possibleClose > openPosition]) == 0) {#
+      closePosition = length(ratio)#
+    } else {#
+      closePosition = possibleClose[possibleClose > openPosition][1]#
+    }#
+  }#
+  if (ratio[openPosition] <= m - k * s) {#
+    possibleClose = which(ratio >= mean(ratio))#
+    if (length(possibleClose[possibleClose > openPosition]) == 0) {#
+      closePosition = length(ratio)#
+    } else {#
+      closePosition = possibleClose[possibleClose > openPosition][1]#
+    }#
+  }#
+  return (nextPosition = c(openPosition, closePosition))#
+}#
+#
+getPositions = function(ratio, startDay, k = 1, m = mean(ratio), s = sd(ratio)){#
+  x = findNextPosition(ratio, startDay, k, m, s)#
+  positions = list(x)#
+  while (x[2] != length(ratio) & !is.na(x[2])){#
+    x = findNextPosition(ratio, startDay = x[2], k, m, s)#
+    positions = c(positions, list(x))#
+  }#
+  return (positions)#
+}#
+#
+positionProfit = function(pos, stockPriceA, stockPriceB, #
+                          m = mean(stockPriceA / stockPriceB)){#
+  unitsA = 1 / stockPriceA[pos[1]]#
+  unitsB = 1 / stockPriceB[pos[1]]#
+  if (stockPriceA[pos[1]] / stockPriceB[pos[1]] > m){#
+    profit = (1 - stockPriceA[pos[2]] * unitsA) + #
+      (stockPriceB[pos[2]] * unitsB - 1)#
+  } else {#
+    profit = (1 - stockPriceB[pos[2]] * unitsB) + #
+      (stockPriceA[pos[2]] * unitsA - 1)#
+  }#
+  return (profit)#
+}#
+#
+getProfit.K = function(x, y, k, m = mean(x/y), s = sd(x/y)){#
+  positions = getPositions(ratio = x / y, startDay = 1, k, m, s)#
+  profit.K = 0#
+  for (i in 1:length(positions)){#
+    if (!is.na(positions[[i]][2])){#
+      profit.i = positionProfit(pos = positions[[i]], stockPriceA = x, #
+                                stockPriceB = y, m = m)#
+      profit.K = profit.K + profit.i#
+    }#
+  }#
+  return (profit.K)#
+}#
+#
+getBest.K = function(x, y, k.min, k.max, numK, m = mean(x/y), s = sd(x/y)){#
+  k.sequence = seq(from = k.min, to = k.max, length = numK)#
+  k.profits = sapply(k.sequence, FUN = getProfit.K, x = x, y = y)#
+  k.star = k.sequence[order(k.profits, decreasing = TRUE)[1]]#
+  return(k.star)#
+}#
+#
+set.seed(100)#
+stockSim = function(n = 4000, rho = 0.99, psi = 0, sigma = rep(1, 2),#
+                    beta0 = rep(100, 2), beta1 = rep(0, 2),#
+                    epsilon = matrix(rnorm(2*n, sd = sigma),#
+                                     nrow = n, byrow = TRUE)){#
+  x1 = numeric(n)#
+  x2 = numeric(n)#
+  x1[1] = 0 + epsilon[1,1]#
+  x2[1] = 0 + epsilon[1,2]#
+  for (i in 2:n) {#
+    x1[i] = rho * x1[i - 1] + psi * (1 - rho) * x2[i - 1] + epsilon[i, 1]#
+    x2[i] = rho * x2[i - 1] + psi * (1 - rho) * x1[i - 1] + epsilon[i, 2]#
+  }#
+  y1 = numeric(n)#
+  y1 = beta0 + beta1 * (1:n) + x1#
+  y2 = numeric(n)#
+  y2 = beta0 + beta1 * (1:n) + x2#
+  return (data.frame(y1, y2))#
+}#
+#
+runSim = function(rho, psi, beta0 = c(100, 100), beta1 = c(0, 0),#
+                  sigma = c(1, 1), n = 4000){#
+  AB = stockSim(n = n, rho = rho, psi = psi, sigma = sigma, #
+                beta0 = beta0, beta1 = beta1, #
+                epsilon = matrix(rnorm(2*n, sd = sigma), #
+                                 nrow = n, byrow = TRUE))#
+  stockA = data.frame(Date = 1:n, Adj.Close = AB[[1]])#
+  stockB = data.frame(Date = 1:n, Adj.Close = AB[[2]])#
+  stockAB = combine2stocks(stockA, stockB)#
+  train.period = c(1, floor(n/2))#
+  trainingData = data.frame(Date = stockAB$Date, Adj.Close.A = stockAB$Adj.Close.A, #
+                            Adj.Close.B = stockAB$Adj.Close.B, Ratio = stockAB$Ratio)[#
+                              train.period[1]:train.period[2], ]#
+  trainingK.max = max(abs(trainingData$Ratio - mean(trainingData$Ratio)) / sd(trainingData$Ratio))#
+  k.star = getBest.K(x = trainingData$Adj.Close.A, y = trainingData$Adj.Close.B, k.min = 0.1, #
+                     k.max = trainingK.max, numK = 100)#
+  test.period = c(train.period[2] + 1, n)#
+  testData = data.frame(Date = stockAB$Date, Adj.Close.A = stockAB$Adj.Close.A, #
+                        Adj.Close.B = stockAB$Adj.Close.B, Ratio = stockAB$Ratio)[#
+                          test.period[1]:test.period[2], ]#
+  profit = getProfit.K(x = testData$Adj.Close.A, y = testData$Adj.Close.B, k = k.star)#
+  return(profit)#
+}#
+#
+simProfitDist = function(..., B = 100)#
+  sapply(1:B, function(i, ...) runSim(...), ...)#
+rhos = seq(.95, .99, by = .01)#
+psis = seq(0, 1, by = .2)#
+beta1.1 = c(0, .05)#
+beta1.2 = c(0, .05)#
+sigmas = c(0.5, 1, 2)#
+#
+simResultsRef = expand.grid(sigmas, beta1.2, beta1.1, psis, rhos)#
+simResultsRef$distribution = rep(1:72, times = 5)#
+#
+# distributionListRho95 = list()#
+# for (i in 1) {#
+#   for (j in 1:length(psis)) {#
+#     for (k in 1:length(beta1.1)) {#
+#       for (l in 1:length(beta1.2)) {#
+#         for (m in 1:length(sigmas)) {#
+#           dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+#                          beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+#                          n = 4000)#
+#           print (head(dist))#
+#           distributionListRho95 = c(distributionListRho95, list(dist))#
+#         }#
+#       }#
+#     }#
+#   }#
+# }#
+# #
+# distributionListRho96 = list()#
+# for (i in 2) {#
+#   for (j in 1:length(psis)) {#
+#     for (k in 1:length(beta1.1)) {#
+#       for (l in 1:length(beta1.2)) {#
+#         for (m in 1:length(sigmas)) {#
+#           dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+#                                beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+#                                n = 4000)#
+#           print (head(dist))#
+#           distributionListRho96 = c(distributionListRho96, list(dist))#
+#         }#
+#       }#
+#     }#
+#   }#
+# }#
+# #
+# distributionListRho97 = list()#
+# for (i in 3) {#
+#   for (j in 1:length(psis)) {#
+#     for (k in 1:length(beta1.1)) {#
+#       for (l in 1:length(beta1.2)) {#
+#         for (m in 1:length(sigmas)) {#
+#           dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+#                                beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+#                                n = 4000)#
+#           print (head(dist))#
+#           distributionListRho97 = c(distributionListRho97, list(dist))#
+#         }#
+#       }#
+#     }#
+#   }#
+# }#
+# #
+# distributionListRho98 = list()#
+# for (i in 4) {#
+#   for (j in 1:length(psis)) {#
+#     for (k in 1:length(beta1.1)) {#
+#       for (l in 1:length(beta1.2)) {#
+#         for (m in 1:length(sigmas)) {#
+#           dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+#                                beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+#                                n = 4000)#
+#           print (head(dist))#
+#           distributionListRho98 = c(distributionListRho98, list(dist))#
+#         }#
+#       }#
+#     }#
+#   }#
+# }#
+#
+distributionListRho99 = list()#
+for (i in 5) {#
+  for (j in 1:length(psis)) {#
+    for (k in 1:length(beta1.1)) {#
+      for (l in 1:length(beta1.2)) {#
+        for (m in 1:length(sigmas)) {#
+          dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+                               beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+                               n = 4000)#
+          print (head(dist))#
+          distributionListRho99 = c(distributionListRho99, list(dist))#
+        }#
+      }#
+    }#
+  }#
+}#
+#
+save(distributionListRho99, file = "simResults99.rda")
+distributionListRho99
+readData = function(fileName, dateFormat = "%m/%d/%y"){#
+  stockData = read.csv(fileName, stringsAsFactors = FALSE)#
+  stockData$Date = as.Date(stockData$Date, dateFormat)#
+  stockData = stockData[order(stockData$Date), ]#
+  return(stockData[ , c("Date", "Adj.Close") ])#
+}#
+#
+combine2stocks = function(stockA, stockB){#
+  stockA = stockA[stockA$Date %in% stockB$Date, ]#
+  stockB = stockB[stockB$Date %in% stockA$Date, ]#
+  stockAB = data.frame(Date = stockA$Date, #
+                       Adj.Close.A = stockA$Adj.Close, #
+                       Adj.Close.B = stockB$Adj.Close, #
+                       Ratio = stockA$Adj.Close / stockB$Adj.Close)#
+  return (stockAB)#
+}#
+#
+plotRatio = function(ratio, k = 1, date = seq(along = ratio), ...){#
+  plot(ratio ~ date, type = "l", xlab = "Date", ylab = "Ratio")#
+  abline(h = mean(ratio), lty = "dashed", col = "green")#
+  abline(h = mean(ratio) - (c(-k, k) * sd(ratio)), lty = "dashed", col = "red")#
+}#
+#
+showPosition = function(pos, ratios, col = c("green", "red"), radius = 100){#
+  symbols(x = pos, y = ratios, circles = rep(radius, times = length(pos)), #
+          fg = col, inches = FALSE, add = TRUE)#
+}#
+#
+findNextPosition = function(ratio, startDay, k = 1, m = mean(ratio), s = sd(ratio)){#
+  possibleOpen = which(abs(ratio - mean(ratio)) >= k * s)#
+  if (length(possibleOpen[possibleOpen >= startDay]) == 0) {#
+    return (integer())#
+  } else {#
+    openPosition = possibleOpen[possibleOpen >= startDay][1]#
+  }#
+  if (ratio[openPosition] >= m + k * s) {#
+    possibleClose = which(ratio <= mean(ratio))#
+    if (length(possibleClose[possibleClose > openPosition]) == 0) {#
+      closePosition = length(ratio)#
+    } else {#
+      closePosition = possibleClose[possibleClose > openPosition][1]#
+    }#
+  }#
+  if (ratio[openPosition] <= m - k * s) {#
+    possibleClose = which(ratio >= mean(ratio))#
+    if (length(possibleClose[possibleClose > openPosition]) == 0) {#
+      closePosition = length(ratio)#
+    } else {#
+      closePosition = possibleClose[possibleClose > openPosition][1]#
+    }#
+  }#
+  return (nextPosition = c(openPosition, closePosition))#
+}#
+#
+getPositions = function(ratio, startDay, k = 1, m = mean(ratio), s = sd(ratio)){#
+  x = findNextPosition(ratio, startDay, k, m, s)#
+  positions = list(x)#
+  while (x[2] != length(ratio) & !is.na(x[2])){#
+    x = findNextPosition(ratio, startDay = x[2], k, m, s)#
+    positions = c(positions, list(x))#
+  }#
+  return (positions)#
+}#
+#
+positionProfit = function(pos, stockPriceA, stockPriceB, #
+                          m = mean(stockPriceA / stockPriceB)){#
+  unitsA = 1 / stockPriceA[pos[1]]#
+  unitsB = 1 / stockPriceB[pos[1]]#
+  if (stockPriceA[pos[1]] / stockPriceB[pos[1]] > m){#
+    profit = (1 - stockPriceA[pos[2]] * unitsA) + #
+      (stockPriceB[pos[2]] * unitsB - 1)#
+  } else {#
+    profit = (1 - stockPriceB[pos[2]] * unitsB) + #
+      (stockPriceA[pos[2]] * unitsA - 1)#
+  }#
+  return (profit)#
+}#
+#
+getProfit.K = function(x, y, k, m = mean(x/y), s = sd(x/y)){#
+  positions = getPositions(ratio = x / y, startDay = 1, k, m, s)#
+  profit.K = 0#
+  for (i in 1:length(positions)){#
+    if (!is.na(positions[[i]][2])){#
+      profit.i = positionProfit(pos = positions[[i]], stockPriceA = x, #
+                                stockPriceB = y, m = m)#
+      profit.K = profit.K + profit.i#
+    }#
+  }#
+  return (profit.K)#
+}#
+#
+getBest.K = function(x, y, k.min, k.max, numK, m = mean(x/y), s = sd(x/y)){#
+  k.sequence = seq(from = k.min, to = k.max, length = numK)#
+  k.profits = sapply(k.sequence, FUN = getProfit.K, x = x, y = y)#
+  k.star = k.sequence[order(k.profits, decreasing = TRUE)[1]]#
+  return(k.star)#
+}#
+#
+set.seed(100)#
+stockSim = function(n = 4000, rho = 0.99, psi = 0, sigma = rep(1, 2),#
+                    beta0 = rep(100, 2), beta1 = rep(0, 2),#
+                    epsilon = matrix(rnorm(2*n, sd = sigma),#
+                                     nrow = n, byrow = TRUE)){#
+  x1 = numeric(n)#
+  x2 = numeric(n)#
+  x1[1] = 0 + epsilon[1,1]#
+  x2[1] = 0 + epsilon[1,2]#
+  for (i in 2:n) {#
+    x1[i] = rho * x1[i - 1] + psi * (1 - rho) * x2[i - 1] + epsilon[i, 1]#
+    x2[i] = rho * x2[i - 1] + psi * (1 - rho) * x1[i - 1] + epsilon[i, 2]#
+  }#
+  y1 = numeric(n)#
+  y1 = beta0 + beta1 * (1:n) + x1#
+  y2 = numeric(n)#
+  y2 = beta0 + beta1 * (1:n) + x2#
+  return (data.frame(y1, y2))#
+}#
+#
+runSim = function(rho, psi, beta0 = c(100, 100), beta1 = c(0, 0),#
+                  sigma = c(1, 1), n = 4000){#
+  AB = stockSim(n = n, rho = rho, psi = psi, sigma = sigma, #
+                beta0 = beta0, beta1 = beta1, #
+                epsilon = matrix(rnorm(2*n, sd = sigma), #
+                                 nrow = n, byrow = TRUE))#
+  stockA = data.frame(Date = 1:n, Adj.Close = AB[[1]])#
+  stockB = data.frame(Date = 1:n, Adj.Close = AB[[2]])#
+  stockAB = combine2stocks(stockA, stockB)#
+  train.period = c(1, floor(n/2))#
+  trainingData = data.frame(Date = stockAB$Date, Adj.Close.A = stockAB$Adj.Close.A, #
+                            Adj.Close.B = stockAB$Adj.Close.B, Ratio = stockAB$Ratio)[#
+                              train.period[1]:train.period[2], ]#
+  trainingK.max = max(abs(trainingData$Ratio - mean(trainingData$Ratio)) / sd(trainingData$Ratio))#
+  k.star = getBest.K(x = trainingData$Adj.Close.A, y = trainingData$Adj.Close.B, k.min = 0.1, #
+                     k.max = trainingK.max, numK = 100)#
+  test.period = c(train.period[2] + 1, n)#
+  testData = data.frame(Date = stockAB$Date, Adj.Close.A = stockAB$Adj.Close.A, #
+                        Adj.Close.B = stockAB$Adj.Close.B, Ratio = stockAB$Ratio)[#
+                          test.period[1]:test.period[2], ]#
+  profit = getProfit.K(x = testData$Adj.Close.A, y = testData$Adj.Close.B, k = k.star)#
+  return(profit)#
+}#
+#
+simProfitDist = function(..., B = 100)#
+  sapply(1:B, function(i, ...) runSim(...), ...)#
+rhos = seq(.95, .99, by = .01)#
+psis = seq(0, 1, by = .2)#
+beta1.1 = c(0, .05)#
+beta1.2 = c(0, .05)#
+sigmas = c(0.5, 1, 2)#
+#
+simResultsRef = expand.grid(sigmas, beta1.2, beta1.1, psis, rhos)#
+simResultsRef$distribution = rep(1:72, times = 5)#
+#
+# distributionListRho95 = list()#
+# for (i in 1) {#
+#   for (j in 1:length(psis)) {#
+#     for (k in 1:length(beta1.1)) {#
+#       for (l in 1:length(beta1.2)) {#
+#         for (m in 1:length(sigmas)) {#
+#           dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+#                          beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+#                          n = 4000)#
+#           print (head(dist))#
+#           distributionListRho95 = c(distributionListRho95, list(dist))#
+#         }#
+#       }#
+#     }#
+#   }#
+# }#
+# #
+# distributionListRho96 = list()#
+# for (i in 2) {#
+#   for (j in 1:length(psis)) {#
+#     for (k in 1:length(beta1.1)) {#
+#       for (l in 1:length(beta1.2)) {#
+#         for (m in 1:length(sigmas)) {#
+#           dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+#                                beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+#                                n = 4000)#
+#           print (head(dist))#
+#           distributionListRho96 = c(distributionListRho96, list(dist))#
+#         }#
+#       }#
+#     }#
+#   }#
+# }#
+# #
+# distributionListRho97 = list()#
+# for (i in 3) {#
+#   for (j in 1:length(psis)) {#
+#     for (k in 1:length(beta1.1)) {#
+#       for (l in 1:length(beta1.2)) {#
+#         for (m in 1:length(sigmas)) {#
+#           dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+#                                beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+#                                n = 4000)#
+#           print (head(dist))#
+#           distributionListRho97 = c(distributionListRho97, list(dist))#
+#         }#
+#       }#
+#     }#
+#   }#
+# }#
+# #
+# distributionListRho98 = list()#
+# for (i in 4) {#
+#   for (j in 1:length(psis)) {#
+#     for (k in 1:length(beta1.1)) {#
+#       for (l in 1:length(beta1.2)) {#
+#         for (m in 1:length(sigmas)) {#
+#           dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+#                                beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+#                                n = 4000)#
+#           print (head(dist))#
+#           distributionListRho98 = c(distributionListRho98, list(dist))#
+#         }#
+#       }#
+#     }#
+#   }#
+# }#
+#
+distributionListRho99 = list()#
+for (i in 5) {#
+  for (j in 1:length(psis)) {#
+    for (k in 1:length(beta1.1)) {#
+      for (l in 1:length(beta1.2)) {#
+        for (m in 1:length(sigmas)) {#
+          dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+                               beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+                               n = 4000)#
+          print (head(dist))#
+          distributionListRho99 = c(distributionListRho99, list(dist))#
+        }#
+      }#
+    }#
+  }#
+}#
+#
+save(distributionListRho99, file = "simResults99.rda")
+simProfitDist(rho = .99)
+simResultsRef[306]
+simResultsRef[306,]
+simProfitDist(rho = .99, psi = .2, beta1 = c(0, 0.05), sigma = c(2,2))
+readData = function(fileName, dateFormat = "%m/%d/%y"){#
+  stockData = read.csv(fileName, stringsAsFactors = FALSE)#
+  stockData$Date = as.Date(stockData$Date, dateFormat)#
+  stockData = stockData[order(stockData$Date), ]#
+  return(stockData[ , c("Date", "Adj.Close") ])#
+}#
+#
+combine2stocks = function(stockA, stockB){#
+  stockA = stockA[stockA$Date %in% stockB$Date, ]#
+  stockB = stockB[stockB$Date %in% stockA$Date, ]#
+  stockAB = data.frame(Date = stockA$Date, #
+                       Adj.Close.A = stockA$Adj.Close, #
+                       Adj.Close.B = stockB$Adj.Close, #
+                       Ratio = stockA$Adj.Close / stockB$Adj.Close)#
+  return (stockAB)#
+}#
+#
+plotRatio = function(ratio, k = 1, date = seq(along = ratio), ...){#
+  plot(ratio ~ date, type = "l", xlab = "Date", ylab = "Ratio")#
+  abline(h = mean(ratio), lty = "dashed", col = "green")#
+  abline(h = mean(ratio) - (c(-k, k) * sd(ratio)), lty = "dashed", col = "red")#
+}#
+#
+showPosition = function(pos, ratios, col = c("green", "red"), radius = 100){#
+  symbols(x = pos, y = ratios, circles = rep(radius, times = length(pos)), #
+          fg = col, inches = FALSE, add = TRUE)#
+}#
+#
+findNextPosition = function(ratio, startDay, k = 1, m = mean(ratio), s = sd(ratio)){#
+  possibleOpen = which(abs(ratio - mean(ratio)) >= k * s)#
+  if (length(possibleOpen[possibleOpen >= startDay]) == 0) {#
+    return (integer())#
+  } else {#
+    openPosition = possibleOpen[possibleOpen >= startDay][1]#
+  }#
+  if (ratio[openPosition] >= m + k * s) {#
+    possibleClose = which(ratio <= mean(ratio))#
+    if (length(possibleClose[possibleClose > openPosition]) == 0) {#
+      closePosition = length(ratio)#
+    } else {#
+      closePosition = possibleClose[possibleClose > openPosition][1]#
+    }#
+  }#
+  if (ratio[openPosition] <= m - k * s) {#
+    possibleClose = which(ratio >= mean(ratio))#
+    if (length(possibleClose[possibleClose > openPosition]) == 0) {#
+      closePosition = length(ratio)#
+    } else {#
+      closePosition = possibleClose[possibleClose > openPosition][1]#
+    }#
+  }#
+  return (nextPosition = c(openPosition, closePosition))#
+}#
+#
+getPositions = function(ratio, startDay, k = 1, m = mean(ratio), s = sd(ratio)){#
+  x = findNextPosition(ratio, startDay, k, m, s)#
+  positions = list(x)#
+  while (x[2] != length(ratio) & !is.na(x[2])){#
+    x = findNextPosition(ratio, startDay = x[2], k, m, s)#
+    positions = c(positions, list(x))#
+  }#
+  return (positions)#
+}#
+#
+positionProfit = function(pos, stockPriceA, stockPriceB, #
+                          m = mean(stockPriceA / stockPriceB)){#
+  unitsA = 1 / stockPriceA[pos[1]]#
+  unitsB = 1 / stockPriceB[pos[1]]#
+  if (stockPriceA[pos[1]] / stockPriceB[pos[1]] > m){#
+    profit = (1 - stockPriceA[pos[2]] * unitsA) + #
+      (stockPriceB[pos[2]] * unitsB - 1)#
+  } else {#
+    profit = (1 - stockPriceB[pos[2]] * unitsB) + #
+      (stockPriceA[pos[2]] * unitsA - 1)#
+  }#
+  return (profit)#
+}#
+#
+getProfit.K = function(x, y, k, m = mean(x/y), s = sd(x/y)){#
+  positions = getPositions(ratio = x / y, startDay = 1, k, m, s)#
+  profit.K = 0#
+  for (i in 1:length(positions)){#
+    if (!is.na(positions[[i]][2])){#
+      profit.i = positionProfit(pos = positions[[i]], stockPriceA = x, #
+                                stockPriceB = y, m = m)#
+      profit.K = profit.K + profit.i#
+    }#
+  }#
+  return (profit.K)#
+}#
+#
+getBest.K = function(x, y, k.min, k.max, numK, m = mean(x/y), s = sd(x/y)){#
+  k.sequence = seq(from = k.min, to = k.max, length = numK)#
+  k.profits = sapply(k.sequence, FUN = getProfit.K, x = x, y = y)#
+  k.star = k.sequence[order(k.profits, decreasing = TRUE)[1]]#
+  return(k.star)#
+}#
+#
+set.seed(100)#
+stockSim = function(n = 4000, rho = 0.99, psi = 0, sigma = rep(1, 2),#
+                    beta0 = rep(100, 2), beta1 = rep(0, 2),#
+                    epsilon = matrix(rnorm(2*n, sd = sigma),#
+                                     nrow = n, byrow = TRUE)){#
+  x1 = numeric(n)#
+  x2 = numeric(n)#
+  x1[1] = 0 + epsilon[1,1]#
+  x2[1] = 0 + epsilon[1,2]#
+  for (i in 2:n) {#
+    x1[i] = rho * x1[i - 1] + psi * (1 - rho) * x2[i - 1] + epsilon[i, 1]#
+    x2[i] = rho * x2[i - 1] + psi * (1 - rho) * x1[i - 1] + epsilon[i, 2]#
+  }#
+  y1 = numeric(n)#
+  y1 = beta0 + beta1 * (1:n) + x1#
+  y2 = numeric(n)#
+  y2 = beta0 + beta1 * (1:n) + x2#
+  return (data.frame(y1, y2))#
+}#
+#
+runSim = function(rho, psi, beta0 = c(100, 100), beta1 = c(0, 0),#
+                  sigma = c(1, 1), n = 4000){#
+  AB = stockSim(n = n, rho = rho, psi = psi, sigma = sigma, #
+                beta0 = beta0, beta1 = beta1, #
+                epsilon = matrix(rnorm(2*n, sd = sigma), #
+                                 nrow = n, byrow = TRUE))#
+  stockA = data.frame(Date = 1:n, Adj.Close = AB[[1]])#
+  stockB = data.frame(Date = 1:n, Adj.Close = AB[[2]])#
+  stockAB = combine2stocks(stockA, stockB)#
+  train.period = c(1, floor(n/2))#
+  trainingData = data.frame(Date = stockAB$Date, Adj.Close.A = stockAB$Adj.Close.A, #
+                            Adj.Close.B = stockAB$Adj.Close.B, Ratio = stockAB$Ratio)[#
+                              train.period[1]:train.period[2], ]#
+  trainingK.max = max(abs(trainingData$Ratio - mean(trainingData$Ratio)) / sd(trainingData$Ratio))#
+  k.star = getBest.K(x = trainingData$Adj.Close.A, y = trainingData$Adj.Close.B, k.min = 0.1, #
+                     k.max = trainingK.max, numK = 100)#
+  test.period = c(train.period[2] + 1, n)#
+  testData = data.frame(Date = stockAB$Date, Adj.Close.A = stockAB$Adj.Close.A, #
+                        Adj.Close.B = stockAB$Adj.Close.B, Ratio = stockAB$Ratio)[#
+                          test.period[1]:test.period[2], ]#
+  profit = getProfit.K(x = testData$Adj.Close.A, y = testData$Adj.Close.B, k = k.star)#
+  return(profit)#
+}#
+#
+simProfitDist = function(..., B = 100)#
+  sapply(1:B, function(i, ...) runSim(...), ...)#
+rhos = seq(.95, .99, by = .01)#
+psis = seq(0, 1, by = .2)#
+beta1.1 = c(0, .05)#
+beta1.2 = c(0, .05)#
+sigmas = c(0.5, 1, 2)#
+#
+simResultsRef = expand.grid(sigmas, beta1.2, beta1.1, psis, rhos)#
+simResultsRef$distribution = rep(1:72, times = 5)#
+#
+# distributionListRho95 = list()#
+# for (i in 1) {#
+#   for (j in 1:length(psis)) {#
+#     for (k in 1:length(beta1.1)) {#
+#       for (l in 1:length(beta1.2)) {#
+#         for (m in 1:length(sigmas)) {#
+#           dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+#                          beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+#                          n = 4000)#
+#           print (head(dist))#
+#           distributionListRho95 = c(distributionListRho95, list(dist))#
+#         }#
+#       }#
+#     }#
+#   }#
+# }#
+# #
+# distributionListRho96 = list()#
+# for (i in 2) {#
+#   for (j in 1:length(psis)) {#
+#     for (k in 1:length(beta1.1)) {#
+#       for (l in 1:length(beta1.2)) {#
+#         for (m in 1:length(sigmas)) {#
+#           dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+#                                beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+#                                n = 4000)#
+#           print (head(dist))#
+#           distributionListRho96 = c(distributionListRho96, list(dist))#
+#         }#
+#       }#
+#     }#
+#   }#
+# }#
+# #
+# distributionListRho97 = list()#
+# for (i in 3) {#
+#   for (j in 1:length(psis)) {#
+#     for (k in 1:length(beta1.1)) {#
+#       for (l in 1:length(beta1.2)) {#
+#         for (m in 1:length(sigmas)) {#
+#           dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+#                                beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+#                                n = 4000)#
+#           print (head(dist))#
+#           distributionListRho97 = c(distributionListRho97, list(dist))#
+#         }#
+#       }#
+#     }#
+#   }#
+# }#
+# #
+# distributionListRho98 = list()#
+# for (i in 4) {#
+#   for (j in 1:length(psis)) {#
+#     for (k in 1:length(beta1.1)) {#
+#       for (l in 1:length(beta1.2)) {#
+#         for (m in 1:length(sigmas)) {#
+#           dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+#                                beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+#                                n = 4000)#
+#           print (head(dist))#
+#           distributionListRho98 = c(distributionListRho98, list(dist))#
+#         }#
+#       }#
+#     }#
+#   }#
+# }#
+#
+distributionListRho99 = list()#
+for (i in 5) {#
+  for (j in 1:length(psis)) {#
+    for (k in 1:length(beta1.1)) {#
+      for (l in 1:length(beta1.2)) {#
+        for (m in 1:length(sigmas)) {#
+          dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+                               beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+                               n = 4000)#
+          print (head(dist))#
+          distributionListRho99 = c(distributionListRho99, list(dist))#
+        }#
+      }#
+    }#
+  }#
+}#
+#
+save(distributionListRho99, file = "simResults99.rda")
+readData = function(fileName, dateFormat = "%m/%d/%y"){#
+  stockData = read.csv(fileName, stringsAsFactors = FALSE)#
+  stockData$Date = as.Date(stockData$Date, dateFormat)#
+  stockData = stockData[order(stockData$Date), ]#
+  return(stockData[ , c("Date", "Adj.Close") ])#
+}#
+#
+combine2stocks = function(stockA, stockB){#
+  stockA = stockA[stockA$Date %in% stockB$Date, ]#
+  stockB = stockB[stockB$Date %in% stockA$Date, ]#
+  stockAB = data.frame(Date = stockA$Date, #
+                       Adj.Close.A = stockA$Adj.Close, #
+                       Adj.Close.B = stockB$Adj.Close, #
+                       Ratio = stockA$Adj.Close / stockB$Adj.Close)#
+  return (stockAB)#
+}#
+#
+plotRatio = function(ratio, k = 1, date = seq(along = ratio), ...){#
+  plot(ratio ~ date, type = "l", xlab = "Date", ylab = "Ratio")#
+  abline(h = mean(ratio), lty = "dashed", col = "green")#
+  abline(h = mean(ratio) - (c(-k, k) * sd(ratio)), lty = "dashed", col = "red")#
+}#
+#
+showPosition = function(pos, ratios, col = c("green", "red"), radius = 100){#
+  symbols(x = pos, y = ratios, circles = rep(radius, times = length(pos)), #
+          fg = col, inches = FALSE, add = TRUE)#
+}#
+#
+findNextPosition = function(ratio, startDay, k = 1, m = mean(ratio), s = sd(ratio)){#
+  possibleOpen = which(abs(ratio - mean(ratio)) >= k * s)#
+  if (length(possibleOpen[possibleOpen >= startDay]) == 0) {#
+    return (integer())#
+  } else {#
+    openPosition = possibleOpen[possibleOpen >= startDay][1]#
+  }#
+  if (ratio[openPosition] >= m + k * s) {#
+    possibleClose = which(ratio <= mean(ratio))#
+    if (length(possibleClose[possibleClose > openPosition]) == 0) {#
+      closePosition = length(ratio)#
+    } else {#
+      closePosition = possibleClose[possibleClose > openPosition][1]#
+    }#
+  }#
+  if (ratio[openPosition] <= m - k * s) {#
+    possibleClose = which(ratio >= mean(ratio))#
+    if (length(possibleClose[possibleClose > openPosition]) == 0) {#
+      closePosition = length(ratio)#
+    } else {#
+      closePosition = possibleClose[possibleClose > openPosition][1]#
+    }#
+  } else {#
+  	closePosition = length(ratio)#
+  }#
+  return (nextPosition = c(openPosition, closePosition))#
+}#
+#
+getPositions = function(ratio, startDay, k = 1, m = mean(ratio), s = sd(ratio)){#
+  x = findNextPosition(ratio, startDay, k, m, s)#
+  positions = list(x)#
+  while (x[2] != length(ratio) & !is.na(x[2])){#
+    x = findNextPosition(ratio, startDay = x[2], k, m, s)#
+    positions = c(positions, list(x))#
+  }#
+  return (positions)#
+}#
+#
+positionProfit = function(pos, stockPriceA, stockPriceB, #
+                          m = mean(stockPriceA / stockPriceB)){#
+  unitsA = 1 / stockPriceA[pos[1]]#
+  unitsB = 1 / stockPriceB[pos[1]]#
+  if (stockPriceA[pos[1]] / stockPriceB[pos[1]] > m){#
+    profit = (1 - stockPriceA[pos[2]] * unitsA) + #
+      (stockPriceB[pos[2]] * unitsB - 1)#
+  } else {#
+    profit = (1 - stockPriceB[pos[2]] * unitsB) + #
+      (stockPriceA[pos[2]] * unitsA - 1)#
+  }#
+  return (profit)#
+}#
+#
+getProfit.K = function(x, y, k, m = mean(x/y), s = sd(x/y)){#
+  positions = getPositions(ratio = x / y, startDay = 1, k, m, s)#
+  profit.K = 0#
+  for (i in 1:length(positions)){#
+    if (!is.na(positions[[i]][2])){#
+      profit.i = positionProfit(pos = positions[[i]], stockPriceA = x, #
+                                stockPriceB = y, m = m)#
+      profit.K = profit.K + profit.i#
+    }#
+  }#
+  return (profit.K)#
+}#
+#
+getBest.K = function(x, y, k.min, k.max, numK, m = mean(x/y), s = sd(x/y)){#
+  k.sequence = seq(from = k.min, to = k.max, length = numK)#
+  k.profits = sapply(k.sequence, FUN = getProfit.K, x = x, y = y)#
+  k.star = k.sequence[order(k.profits, decreasing = TRUE)[1]]#
+  return(k.star)#
+}#
+#
+set.seed(100)#
+stockSim = function(n = 4000, rho = 0.99, psi = 0, sigma = rep(1, 2),#
+                    beta0 = rep(100, 2), beta1 = rep(0, 2),#
+                    epsilon = matrix(rnorm(2*n, sd = sigma),#
+                                     nrow = n, byrow = TRUE)){#
+  x1 = numeric(n)#
+  x2 = numeric(n)#
+  x1[1] = 0 + epsilon[1,1]#
+  x2[1] = 0 + epsilon[1,2]#
+  for (i in 2:n) {#
+    x1[i] = rho * x1[i - 1] + psi * (1 - rho) * x2[i - 1] + epsilon[i, 1]#
+    x2[i] = rho * x2[i - 1] + psi * (1 - rho) * x1[i - 1] + epsilon[i, 2]#
+  }#
+  y1 = numeric(n)#
+  y1 = beta0 + beta1 * (1:n) + x1#
+  y2 = numeric(n)#
+  y2 = beta0 + beta1 * (1:n) + x2#
+  return (data.frame(y1, y2))#
+}#
+#
+runSim = function(rho, psi, beta0 = c(100, 100), beta1 = c(0, 0),#
+                  sigma = c(1, 1), n = 4000){#
+  AB = stockSim(n = n, rho = rho, psi = psi, sigma = sigma, #
+                beta0 = beta0, beta1 = beta1, #
+                epsilon = matrix(rnorm(2*n, sd = sigma), #
+                                 nrow = n, byrow = TRUE))#
+  stockA = data.frame(Date = 1:n, Adj.Close = AB[[1]])#
+  stockB = data.frame(Date = 1:n, Adj.Close = AB[[2]])#
+  stockAB = combine2stocks(stockA, stockB)#
+  train.period = c(1, floor(n/2))#
+  trainingData = data.frame(Date = stockAB$Date, Adj.Close.A = stockAB$Adj.Close.A, #
+                            Adj.Close.B = stockAB$Adj.Close.B, Ratio = stockAB$Ratio)[#
+                              train.period[1]:train.period[2], ]#
+  trainingK.max = max(abs(trainingData$Ratio - mean(trainingData$Ratio)) / sd(trainingData$Ratio))#
+  k.star = getBest.K(x = trainingData$Adj.Close.A, y = trainingData$Adj.Close.B, k.min = 0.1, #
+                     k.max = trainingK.max, numK = 100)#
+  test.period = c(train.period[2] + 1, n)#
+  testData = data.frame(Date = stockAB$Date, Adj.Close.A = stockAB$Adj.Close.A, #
+                        Adj.Close.B = stockAB$Adj.Close.B, Ratio = stockAB$Ratio)[#
+                          test.period[1]:test.period[2], ]#
+  profit = getProfit.K(x = testData$Adj.Close.A, y = testData$Adj.Close.B, k = k.star)#
+  return(profit)#
+}#
+#
+simProfitDist = function(..., B = 100)#
+  sapply(1:B, function(i, ...) runSim(...), ...)#
+rhos = seq(.95, .99, by = .01)#
+psis = seq(0, 1, by = .2)#
+beta1.1 = c(0, .05)#
+beta1.2 = c(0, .05)#
+sigmas = c(0.5, 1, 2)#
+#
+simResultsRef = expand.grid(sigmas, beta1.2, beta1.1, psis, rhos)#
+simResultsRef$distribution = rep(1:72, times = 5)#
+#
+# distributionListRho95 = list()#
+# for (i in 1) {#
+#   for (j in 1:length(psis)) {#
+#     for (k in 1:length(beta1.1)) {#
+#       for (l in 1:length(beta1.2)) {#
+#         for (m in 1:length(sigmas)) {#
+#           dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+#                          beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+#                          n = 4000)#
+#           print (head(dist))#
+#           distributionListRho95 = c(distributionListRho95, list(dist))#
+#         }#
+#       }#
+#     }#
+#   }#
+# }#
+# #
+# distributionListRho96 = list()#
+# for (i in 2) {#
+#   for (j in 1:length(psis)) {#
+#     for (k in 1:length(beta1.1)) {#
+#       for (l in 1:length(beta1.2)) {#
+#         for (m in 1:length(sigmas)) {#
+#           dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+#                                beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+#                                n = 4000)#
+#           print (head(dist))#
+#           distributionListRho96 = c(distributionListRho96, list(dist))#
+#         }#
+#       }#
+#     }#
+#   }#
+# }#
+# #
+# distributionListRho97 = list()#
+# for (i in 3) {#
+#   for (j in 1:length(psis)) {#
+#     for (k in 1:length(beta1.1)) {#
+#       for (l in 1:length(beta1.2)) {#
+#         for (m in 1:length(sigmas)) {#
+#           dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+#                                beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+#                                n = 4000)#
+#           print (head(dist))#
+#           distributionListRho97 = c(distributionListRho97, list(dist))#
+#         }#
+#       }#
+#     }#
+#   }#
+# }#
+# #
+# distributionListRho98 = list()#
+# for (i in 4) {#
+#   for (j in 1:length(psis)) {#
+#     for (k in 1:length(beta1.1)) {#
+#       for (l in 1:length(beta1.2)) {#
+#         for (m in 1:length(sigmas)) {#
+#           dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+#                                beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+#                                n = 4000)#
+#           print (head(dist))#
+#           distributionListRho98 = c(distributionListRho98, list(dist))#
+#         }#
+#       }#
+#     }#
+#   }#
+# }#
+#
+distributionListRho99 = list()#
+for (i in 5) {#
+  for (j in 1:length(psis)) {#
+    for (k in 1:length(beta1.1)) {#
+      for (l in 1:length(beta1.2)) {#
+        for (m in 1:length(sigmas)) {#
+          dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+                               beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+                               n = 4000)#
+          print (head(dist))#
+          distributionListRho99 = c(distributionListRho99, list(dist))#
+        }#
+      }#
+    }#
+  }#
+}#
+#
+save(distributionListRho99, file = "simResults99.rda")
+readData = function(fileName, dateFormat = "%m/%d/%y"){#
+  stockData = read.csv(fileName, stringsAsFactors = FALSE)#
+  stockData$Date = as.Date(stockData$Date, dateFormat)#
+  stockData = stockData[order(stockData$Date), ]#
+  return(stockData[ , c("Date", "Adj.Close") ])#
+}#
+#
+combine2stocks = function(stockA, stockB){#
+  stockA = stockA[stockA$Date %in% stockB$Date, ]#
+  stockB = stockB[stockB$Date %in% stockA$Date, ]#
+  stockAB = data.frame(Date = stockA$Date, #
+                       Adj.Close.A = stockA$Adj.Close, #
+                       Adj.Close.B = stockB$Adj.Close, #
+                       Ratio = stockA$Adj.Close / stockB$Adj.Close)#
+  return (stockAB)#
+}#
+#
+plotRatio = function(ratio, k = 1, date = seq(along = ratio), ...){#
+  plot(ratio ~ date, type = "l", xlab = "Date", ylab = "Ratio")#
+  abline(h = mean(ratio), lty = "dashed", col = "green")#
+  abline(h = mean(ratio) - (c(-k, k) * sd(ratio)), lty = "dashed", col = "red")#
+}#
+#
+showPosition = function(pos, ratios, col = c("green", "red"), radius = 100){#
+  symbols(x = pos, y = ratios, circles = rep(radius, times = length(pos)), #
+          fg = col, inches = FALSE, add = TRUE)#
+}#
+#
+findNextPosition = function(ratio, startDay, k = 1, m = mean(ratio), s = sd(ratio)){#
+  possibleOpen = which(abs(ratio - mean(ratio)) >= k * s)#
+  if (length(possibleOpen[possibleOpen >= startDay]) == 0) {#
+    return (integer())#
+  } else {#
+    openPosition = possibleOpen[possibleOpen >= startDay][1]#
+  }#
+  if (ratio[openPosition] >= m + k * s) {#
+    possibleClose = which(ratio <= mean(ratio))#
+    if (length(possibleClose[possibleClose > openPosition]) == 0) {#
+      closePosition = length(ratio)#
+    } else {#
+      closePosition = possibleClose[possibleClose > openPosition][1]#
+    }#
+  }#
+  if (ratio[openPosition] <= m - k * s) {#
+    possibleClose = which(ratio >= mean(ratio))#
+    if (length(possibleClose[possibleClose > openPosition]) == 0) {#
+      closePosition = length(ratio)#
+    } else {#
+      closePosition = possibleClose[possibleClose > openPosition][1]#
+    }#
+  }#
+  return (nextPosition = c(openPosition, closePosition))#
+}#
+#
+getPositions = function(ratio, startDay, k = 1, m = mean(ratio), s = sd(ratio)){#
+  x = findNextPosition(ratio, startDay, k, m, s)#
+  positions = list(x)#
+  while (x[2] != length(ratio) & !is.na(x[2])){#
+    x = findNextPosition(ratio, startDay = x[2], k, m, s)#
+    positions = c(positions, list(x))#
+  }#
+  return (positions)#
+}#
+#
+positionProfit = function(pos, stockPriceA, stockPriceB, #
+                          m = mean(stockPriceA / stockPriceB)){#
+  unitsA = 1 / stockPriceA[pos[1]]#
+  unitsB = 1 / stockPriceB[pos[1]]#
+  if (stockPriceA[pos[1]] / stockPriceB[pos[1]] > m){#
+    profit = (1 - stockPriceA[pos[2]] * unitsA) + #
+      (stockPriceB[pos[2]] * unitsB - 1)#
+  } else {#
+    profit = (1 - stockPriceB[pos[2]] * unitsB) + #
+      (stockPriceA[pos[2]] * unitsA - 1)#
+  }#
+  return (profit)#
+}#
+#
+getProfit.K = function(x, y, k, m = mean(x/y), s = sd(x/y)){#
+  positions = getPositions(ratio = x / y, startDay = 1, k, m, s)#
+  profit.K = 0#
+  for (i in 1:length(positions)){#
+    if (!is.na(positions[[i]][2])){#
+      profit.i = positionProfit(pos = positions[[i]], stockPriceA = x, #
+                                stockPriceB = y, m = m)#
+      profit.K = profit.K + profit.i#
+    }#
+  }#
+  return (profit.K)#
+}#
+#
+getBest.K = function(x, y, k.min, k.max, numK, m = mean(x/y), s = sd(x/y)){#
+  k.sequence = seq(from = k.min, to = k.max, length = numK)#
+  k.profits = sapply(k.sequence, FUN = getProfit.K, x = x, y = y)#
+  k.star = k.sequence[order(k.profits, decreasing = TRUE)[1]]#
+  return(k.star)#
+}#
+#
+set.seed(100)#
+stockSim = function(n = 4000, rho = 0.99, psi = 0, sigma = rep(1, 2),#
+                    beta0 = rep(100, 2), beta1 = rep(0, 2),#
+                    epsilon = matrix(rnorm(2*n, sd = sigma),#
+                                     nrow = n, byrow = TRUE)){#
+  x1 = numeric(n)#
+  x2 = numeric(n)#
+  x1[1] = 0 + epsilon[1,1]#
+  x2[1] = 0 + epsilon[1,2]#
+  for (i in 2:n) {#
+    x1[i] = rho * x1[i - 1] + psi * (1 - rho) * x2[i - 1] + epsilon[i, 1]#
+    x2[i] = rho * x2[i - 1] + psi * (1 - rho) * x1[i - 1] + epsilon[i, 2]#
+  }#
+  y1 = numeric(n)#
+  y1 = beta0 + beta1 * (1:n) + x1#
+  y2 = numeric(n)#
+  y2 = beta0 + beta1 * (1:n) + x2#
+  return (data.frame(y1, y2))#
+}#
+#
+runSim = function(rho, psi, beta0 = c(100, 100), beta1 = c(0, 0),#
+                  sigma = c(1, 1), n = 4000){#
+  AB = stockSim(n = n, rho = rho, psi = psi, sigma = sigma, #
+                beta0 = beta0, beta1 = beta1, #
+                epsilon = matrix(rnorm(2*n, sd = sigma), #
+                                 nrow = n, byrow = TRUE))#
+  stockA = data.frame(Date = 1:n, Adj.Close = AB[[1]])#
+  stockB = data.frame(Date = 1:n, Adj.Close = AB[[2]])#
+  stockAB = combine2stocks(stockA, stockB)#
+  train.period = c(1, floor(n/2))#
+  trainingData = data.frame(Date = stockAB$Date, Adj.Close.A = stockAB$Adj.Close.A, #
+                            Adj.Close.B = stockAB$Adj.Close.B, Ratio = stockAB$Ratio)[#
+                              train.period[1]:train.period[2], ]#
+  trainingK.max = max(abs(trainingData$Ratio - mean(trainingData$Ratio)) / sd(trainingData$Ratio))#
+  k.star = getBest.K(x = trainingData$Adj.Close.A, y = trainingData$Adj.Close.B, k.min = 0.1, #
+                     k.max = trainingK.max, numK = 100)#
+  test.period = c(train.period[2] + 1, n)#
+  testData = data.frame(Date = stockAB$Date, Adj.Close.A = stockAB$Adj.Close.A, #
+                        Adj.Close.B = stockAB$Adj.Close.B, Ratio = stockAB$Ratio)[#
+                          test.period[1]:test.period[2], ]#
+  profit = getProfit.K(x = testData$Adj.Close.A, y = testData$Adj.Close.B, k = k.star)#
+  return(profit)#
+}#
+#
+simProfitDist = function(..., B = 100)#
+  sapply(1:B, function(i, ...) runSim(...), ...)#
+rhos = seq(.95, .99, by = .01)#
+psis = seq(0, 1, by = .2)#
+beta1.1 = c(0, .05)#
+beta1.2 = c(0, .05)#
+sigmas = c(0.5, 1, 2)#
+#
+simResultsRef = expand.grid(sigmas, beta1.2, beta1.1, psis, rhos)#
+simResultsRef$distribution = rep(1:72, times = 5)#
+#
+# distributionListRho95 = list()#
+# for (i in 1) {#
+#   for (j in 1:length(psis)) {#
+#     for (k in 1:length(beta1.1)) {#
+#       for (l in 1:length(beta1.2)) {#
+#         for (m in 1:length(sigmas)) {#
+#           dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+#                          beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+#                          n = 4000)#
+#           print (head(dist))#
+#           distributionListRho95 = c(distributionListRho95, list(dist))#
+#         }#
+#       }#
+#     }#
+#   }#
+# }#
+# #
+# distributionListRho96 = list()#
+# for (i in 2) {#
+#   for (j in 1:length(psis)) {#
+#     for (k in 1:length(beta1.1)) {#
+#       for (l in 1:length(beta1.2)) {#
+#         for (m in 1:length(sigmas)) {#
+#           dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+#                                beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+#                                n = 4000)#
+#           print (head(dist))#
+#           distributionListRho96 = c(distributionListRho96, list(dist))#
+#         }#
+#       }#
+#     }#
+#   }#
+# }#
+# #
+# distributionListRho97 = list()#
+# for (i in 3) {#
+#   for (j in 1:length(psis)) {#
+#     for (k in 1:length(beta1.1)) {#
+#       for (l in 1:length(beta1.2)) {#
+#         for (m in 1:length(sigmas)) {#
+#           dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+#                                beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+#                                n = 4000)#
+#           print (head(dist))#
+#           distributionListRho97 = c(distributionListRho97, list(dist))#
+#         }#
+#       }#
+#     }#
+#   }#
+# }#
+# #
+# distributionListRho98 = list()#
+# for (i in 4) {#
+#   for (j in 1:length(psis)) {#
+#     for (k in 1:length(beta1.1)) {#
+#       for (l in 1:length(beta1.2)) {#
+#         for (m in 1:length(sigmas)) {#
+#           dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+#                                beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+#                                n = 4000)#
+#           print (head(dist))#
+#           distributionListRho98 = c(distributionListRho98, list(dist))#
+#         }#
+#       }#
+#     }#
+#   }#
+# }#
+#
+distributionListRho99 = list()#
+for (i in 5) {#
+  for (j in 1:length(psis)) {#
+    for (k in 1:length(beta1.1)) {#
+      for (l in 1:length(beta1.2)) {#
+        for (m in 1:length(sigmas)) {#
+          dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+                               beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+                               n = 4000)#
+          print (head(dist))#
+          distributionListRho99 = c(distributionListRho99, list(dist))#
+        }#
+      }#
+    }#
+  }#
+}#
+#
+save(distributionListRho99, file = "simResults99.rda")
+simResultsRef[307,]
+simProfitDist(rho = .99, psi = .2, beta1 = c(0, 0.05), sigma = c(.5,.5))
+readData = function(fileName, dateFormat = "%m/%d/%y"){#
+  stockData = read.csv(fileName, stringsAsFactors = FALSE)#
+  stockData$Date = as.Date(stockData$Date, dateFormat)#
+  stockData = stockData[order(stockData$Date), ]#
+  return(stockData[ , c("Date", "Adj.Close") ])#
+}#
+#
+combine2stocks = function(stockA, stockB){#
+  stockA = stockA[stockA$Date %in% stockB$Date, ]#
+  stockB = stockB[stockB$Date %in% stockA$Date, ]#
+  stockAB = data.frame(Date = stockA$Date, #
+                       Adj.Close.A = stockA$Adj.Close, #
+                       Adj.Close.B = stockB$Adj.Close, #
+                       Ratio = stockA$Adj.Close / stockB$Adj.Close)#
+  return (stockAB)#
+}#
+#
+plotRatio = function(ratio, k = 1, date = seq(along = ratio), ...){#
+  plot(ratio ~ date, type = "l", xlab = "Date", ylab = "Ratio")#
+  abline(h = mean(ratio), lty = "dashed", col = "green")#
+  abline(h = mean(ratio) - (c(-k, k) * sd(ratio)), lty = "dashed", col = "red")#
+}#
+#
+showPosition = function(pos, ratios, col = c("green", "red"), radius = 100){#
+  symbols(x = pos, y = ratios, circles = rep(radius, times = length(pos)), #
+          fg = col, inches = FALSE, add = TRUE)#
+}#
+#
+findNextPosition = function(ratio, startDay, k = 1, m = mean(ratio), s = sd(ratio)){#
+  possibleOpen = which(abs(ratio - mean(ratio)) >= k * s)#
+  if (length(possibleOpen[possibleOpen >= startDay]) == 0) {#
+    return (integer())#
+  } else {#
+    openPosition = possibleOpen[possibleOpen >= startDay][1]#
+  }#
+  if (ratio[openPosition] >= m + k * s) {#
+    possibleClose = which(ratio <= mean(ratio))#
+    if (length(possibleClose[possibleClose > openPosition]) == 0) {#
+      closePosition = length(ratio)#
+    } else {#
+      closePosition = possibleClose[possibleClose > openPosition][1]#
+    }#
+  }#
+  if (ratio[openPosition] <= m - k * s) {#
+    possibleClose = which(ratio >= mean(ratio))#
+    if (length(possibleClose[possibleClose > openPosition]) == 0) {#
+      closePosition = length(ratio)#
+    } else {#
+      closePosition = possibleClose[possibleClose > openPosition][1]#
+    }#
+  }#
+  return (nextPosition = c(openPosition, closePosition))#
+}#
+#
+getPositions = function(ratio, startDay, k = 1, m = mean(ratio), s = sd(ratio)){#
+  x = findNextPosition(ratio, startDay, k, m, s)#
+  positions = list(x)#
+  while (x[2] != length(ratio) & !is.na(x[2])){#
+    x = findNextPosition(ratio, startDay = x[2], k, m, s)#
+    positions = c(positions, list(x))#
+  }#
+  return (positions)#
+}#
+#
+positionProfit = function(pos, stockPriceA, stockPriceB, #
+                          m = mean(stockPriceA / stockPriceB)){#
+  unitsA = 1 / stockPriceA[pos[1]]#
+  unitsB = 1 / stockPriceB[pos[1]]#
+  if (stockPriceA[pos[1]] / stockPriceB[pos[1]] > m){#
+    profit = (1 - stockPriceA[pos[2]] * unitsA) + #
+      (stockPriceB[pos[2]] * unitsB - 1)#
+  } else {#
+    profit = (1 - stockPriceB[pos[2]] * unitsB) + #
+      (stockPriceA[pos[2]] * unitsA - 1)#
+  }#
+  return (profit)#
+}#
+#
+getProfit.K = function(x, y, k, m = mean(x/y), s = sd(x/y)){#
+  positions = getPositions(ratio = x / y, startDay = 1, k, m, s)#
+  profit.K = 0#
+  for (i in 1:length(positions)){#
+    if (!is.na(positions[[i]][2])){#
+      profit.i = positionProfit(pos = positions[[i]], stockPriceA = x, #
+                                stockPriceB = y, m = m)#
+      profit.K = profit.K + profit.i#
+    }#
+  }#
+  return (profit.K)#
+}#
+#
+getBest.K = function(x, y, k.min, k.max, numK, m = mean(x/y), s = sd(x/y)){#
+  k.sequence = seq(from = k.min, to = k.max, length = numK)#
+  k.profits = sapply(k.sequence, FUN = getProfit.K, x = x, y = y)#
+  k.star = k.sequence[order(k.profits, decreasing = TRUE)[1]]#
+  return(k.star)#
+}#
+#
+set.seed(100)#
+stockSim = function(n = 4000, rho = 0.99, psi = 0, sigma = rep(1, 2),#
+                    beta0 = rep(100, 2), beta1 = rep(0, 2),#
+                    epsilon = matrix(rnorm(2*n, sd = sigma),#
+                                     nrow = n, byrow = TRUE)){#
+  x1 = numeric(n)#
+  x2 = numeric(n)#
+  x1[1] = 0 + epsilon[1,1]#
+  x2[1] = 0 + epsilon[1,2]#
+  for (i in 2:n) {#
+    x1[i] = rho * x1[i - 1] + psi * (1 - rho) * x2[i - 1] + epsilon[i, 1]#
+    x2[i] = rho * x2[i - 1] + psi * (1 - rho) * x1[i - 1] + epsilon[i, 2]#
+  }#
+  y1 = numeric(n)#
+  y1 = beta0 + beta1 * (1:n) + x1#
+  y2 = numeric(n)#
+  y2 = beta0 + beta1 * (1:n) + x2#
+  return (data.frame(y1, y2))#
+}#
+#
+runSim = function(rho, psi, beta0 = c(100, 100), beta1 = c(0, 0),#
+                  sigma = c(1, 1), n = 4000){#
+  AB = stockSim(n = n, rho = rho, psi = psi, sigma = sigma, #
+                beta0 = beta0, beta1 = beta1, #
+                epsilon = matrix(rnorm(2*n, sd = sigma), #
+                                 nrow = n, byrow = TRUE))#
+  stockA = data.frame(Date = 1:n, Adj.Close = AB[[1]])#
+  stockB = data.frame(Date = 1:n, Adj.Close = AB[[2]])#
+  stockAB = combine2stocks(stockA, stockB)#
+  train.period = c(1, floor(n/2))#
+  trainingData = data.frame(Date = stockAB$Date, Adj.Close.A = stockAB$Adj.Close.A, #
+                            Adj.Close.B = stockAB$Adj.Close.B, Ratio = stockAB$Ratio)[#
+                              train.period[1]:train.period[2], ]#
+  trainingK.max = max(abs(trainingData$Ratio - mean(trainingData$Ratio)) / sd(trainingData$Ratio))#
+  k.star = getBest.K(x = trainingData$Adj.Close.A, y = trainingData$Adj.Close.B, k.min = 0.1, #
+                     k.max = trainingK.max, numK = 100)#
+  test.period = c(train.period[2] + 1, n)#
+  testData = data.frame(Date = stockAB$Date, Adj.Close.A = stockAB$Adj.Close.A, #
+                        Adj.Close.B = stockAB$Adj.Close.B, Ratio = stockAB$Ratio)[#
+                          test.period[1]:test.period[2], ]#
+  profit = getProfit.K(x = testData$Adj.Close.A, y = testData$Adj.Close.B, k = k.star)#
+  return(profit)#
+}#
+#
+simProfitDist = function(..., B = 100)#
+  sapply(1:B, function(i, ...) runSim(...), ...)#
+rhos = seq(.95, .99, by = .01)#
+psis = seq(0, 1, by = .2)#
+beta1.1 = c(0, .05)#
+beta1.2 = c(0, .05)#
+sigmas = c(0.5, 1, 2)#
+#
+simResultsRef = expand.grid(sigmas, beta1.2, beta1.1, psis, rhos)#
+simResultsRef$distribution = rep(1:72, times = 5)#
+#
+# distributionListRho95 = list()#
+# for (i in 1) {#
+#   for (j in 1:length(psis)) {#
+#     for (k in 1:length(beta1.1)) {#
+#       for (l in 1:length(beta1.2)) {#
+#         for (m in 1:length(sigmas)) {#
+#           dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+#                          beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+#                          n = 4000)#
+#           print (head(dist))#
+#           distributionListRho95 = c(distributionListRho95, list(dist))#
+#         }#
+#       }#
+#     }#
+#   }#
+# }#
+# #
+# distributionListRho96 = list()#
+# for (i in 2) {#
+#   for (j in 1:length(psis)) {#
+#     for (k in 1:length(beta1.1)) {#
+#       for (l in 1:length(beta1.2)) {#
+#         for (m in 1:length(sigmas)) {#
+#           dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+#                                beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+#                                n = 4000)#
+#           print (head(dist))#
+#           distributionListRho96 = c(distributionListRho96, list(dist))#
+#         }#
+#       }#
+#     }#
+#   }#
+# }#
+# #
+# distributionListRho97 = list()#
+# for (i in 3) {#
+#   for (j in 1:length(psis)) {#
+#     for (k in 1:length(beta1.1)) {#
+#       for (l in 1:length(beta1.2)) {#
+#         for (m in 1:length(sigmas)) {#
+#           dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+#                                beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+#                                n = 4000)#
+#           print (head(dist))#
+#           distributionListRho97 = c(distributionListRho97, list(dist))#
+#         }#
+#       }#
+#     }#
+#   }#
+# }#
+# #
+# distributionListRho98 = list()#
+# for (i in 4) {#
+#   for (j in 1:length(psis)) {#
+#     for (k in 1:length(beta1.1)) {#
+#       for (l in 1:length(beta1.2)) {#
+#         for (m in 1:length(sigmas)) {#
+#           dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+#                                beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+#                                n = 4000)#
+#           print (head(dist))#
+#           distributionListRho98 = c(distributionListRho98, list(dist))#
+#         }#
+#       }#
+#     }#
+#   }#
+# }#
+#
+distributionListRho99 = list()#
+for (i in 5) {#
+  for (j in 1:length(psis)) {#
+    for (k in 1:length(beta1.1)) {#
+      for (l in 1:length(beta1.2)) {#
+        for (m in 1:length(sigmas)) {#
+          dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+                               beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+                               n = 4000)#
+          print (head(dist))#
+          distributionListRho99 = c(distributionListRho99, list(dist))#
+        }#
+      }#
+    }#
+  }#
+}#
+#
+save(distributionListRho99, file = "simResults99.rda")
+readData = function(fileName, dateFormat = "%m/%d/%y"){#
+  stockData = read.csv(fileName, stringsAsFactors = FALSE)#
+  stockData$Date = as.Date(stockData$Date, dateFormat)#
+  stockData = stockData[order(stockData$Date), ]#
+  return(stockData[ , c("Date", "Adj.Close") ])#
+}#
+#
+combine2stocks = function(stockA, stockB){#
+  stockA = stockA[stockA$Date %in% stockB$Date, ]#
+  stockB = stockB[stockB$Date %in% stockA$Date, ]#
+  stockAB = data.frame(Date = stockA$Date, #
+                       Adj.Close.A = stockA$Adj.Close, #
+                       Adj.Close.B = stockB$Adj.Close, #
+                       Ratio = stockA$Adj.Close / stockB$Adj.Close)#
+  return (stockAB)#
+}#
+#
+plotRatio = function(ratio, k = 1, date = seq(along = ratio), ...){#
+  plot(ratio ~ date, type = "l", xlab = "Date", ylab = "Ratio")#
+  abline(h = mean(ratio), lty = "dashed", col = "green")#
+  abline(h = mean(ratio) - (c(-k, k) * sd(ratio)), lty = "dashed", col = "red")#
+}#
+#
+showPosition = function(pos, ratios, col = c("green", "red"), radius = 100){#
+  symbols(x = pos, y = ratios, circles = rep(radius, times = length(pos)), #
+          fg = col, inches = FALSE, add = TRUE)#
+}#
+#
+findNextPosition = function(ratio, startDay, k = 1, m = mean(ratio), s = sd(ratio)){#
+  possibleOpen = which(abs(ratio - mean(ratio)) >= k * s)#
+  if (length(possibleOpen[possibleOpen >= startDay]) == 0) {#
+    return (integer())#
+  } else {#
+    openPosition = possibleOpen[possibleOpen >= startDay][1]#
+  }#
+  if (ratio[openPosition] >= m + k * s) {#
+    possibleClose = which(ratio <= mean(ratio))#
+    if (length(possibleClose[possibleClose > openPosition]) == 0) {#
+      closePosition = length(ratio)#
+    } else {#
+      closePosition = possibleClose[possibleClose > openPosition][1]#
+    }#
+  }#
+  if (ratio[openPosition] <= m - k * s) {#
+    possibleClose = which(ratio >= mean(ratio))#
+    if (length(possibleClose[possibleClose > openPosition]) == 0) {#
+      closePosition = length(ratio)#
+    } else {#
+      closePosition = possibleClose[possibleClose > openPosition][1]#
+    }#
+  } else {#
+  	closePosition = NULL#
+  }#
+  return (nextPosition = c(openPosition, closePosition))#
+}#
+#
+getPositions = function(ratio, startDay, k = 1, m = mean(ratio), s = sd(ratio)){#
+  x = findNextPosition(ratio, startDay, k, m, s)#
+  positions = list(x)#
+  while (x[2] != length(ratio) & !is.na(x[2])){#
+    x = findNextPosition(ratio, startDay = x[2], k, m, s)#
+    positions = c(positions, list(x))#
+  }#
+  return (positions)#
+}#
+#
+positionProfit = function(pos, stockPriceA, stockPriceB, #
+                          m = mean(stockPriceA / stockPriceB)){#
+  unitsA = 1 / stockPriceA[pos[1]]#
+  unitsB = 1 / stockPriceB[pos[1]]#
+  if (stockPriceA[pos[1]] / stockPriceB[pos[1]] > m){#
+    profit = (1 - stockPriceA[pos[2]] * unitsA) + #
+      (stockPriceB[pos[2]] * unitsB - 1)#
+  } else {#
+    profit = (1 - stockPriceB[pos[2]] * unitsB) + #
+      (stockPriceA[pos[2]] * unitsA - 1)#
+  }#
+  return (profit)#
+}#
+#
+getProfit.K = function(x, y, k, m = mean(x/y), s = sd(x/y)){#
+  positions = getPositions(ratio = x / y, startDay = 1, k, m, s)#
+  profit.K = 0#
+  for (i in 1:length(positions)){#
+    if (!is.na(positions[[i]][2])){#
+      profit.i = positionProfit(pos = positions[[i]], stockPriceA = x, #
+                                stockPriceB = y, m = m)#
+      profit.K = profit.K + profit.i#
+    }#
+  }#
+  return (profit.K)#
+}#
+#
+getBest.K = function(x, y, k.min, k.max, numK, m = mean(x/y), s = sd(x/y)){#
+  k.sequence = seq(from = k.min, to = k.max, length = numK)#
+  k.profits = sapply(k.sequence, FUN = getProfit.K, x = x, y = y)#
+  k.star = k.sequence[order(k.profits, decreasing = TRUE)[1]]#
+  return(k.star)#
+}#
+#
+set.seed(100)#
+stockSim = function(n = 4000, rho = 0.99, psi = 0, sigma = rep(1, 2),#
+                    beta0 = rep(100, 2), beta1 = rep(0, 2),#
+                    epsilon = matrix(rnorm(2*n, sd = sigma),#
+                                     nrow = n, byrow = TRUE)){#
+  x1 = numeric(n)#
+  x2 = numeric(n)#
+  x1[1] = 0 + epsilon[1,1]#
+  x2[1] = 0 + epsilon[1,2]#
+  for (i in 2:n) {#
+    x1[i] = rho * x1[i - 1] + psi * (1 - rho) * x2[i - 1] + epsilon[i, 1]#
+    x2[i] = rho * x2[i - 1] + psi * (1 - rho) * x1[i - 1] + epsilon[i, 2]#
+  }#
+  y1 = numeric(n)#
+  y1 = beta0 + beta1 * (1:n) + x1#
+  y2 = numeric(n)#
+  y2 = beta0 + beta1 * (1:n) + x2#
+  return (data.frame(y1, y2))#
+}#
+#
+runSim = function(rho, psi, beta0 = c(100, 100), beta1 = c(0, 0),#
+                  sigma = c(1, 1), n = 4000){#
+  AB = stockSim(n = n, rho = rho, psi = psi, sigma = sigma, #
+                beta0 = beta0, beta1 = beta1, #
+                epsilon = matrix(rnorm(2*n, sd = sigma), #
+                                 nrow = n, byrow = TRUE))#
+  stockA = data.frame(Date = 1:n, Adj.Close = AB[[1]])#
+  stockB = data.frame(Date = 1:n, Adj.Close = AB[[2]])#
+  stockAB = combine2stocks(stockA, stockB)#
+  train.period = c(1, floor(n/2))#
+  trainingData = data.frame(Date = stockAB$Date, Adj.Close.A = stockAB$Adj.Close.A, #
+                            Adj.Close.B = stockAB$Adj.Close.B, Ratio = stockAB$Ratio)[#
+                              train.period[1]:train.period[2], ]#
+  trainingK.max = max(abs(trainingData$Ratio - mean(trainingData$Ratio)) / sd(trainingData$Ratio))#
+  k.star = getBest.K(x = trainingData$Adj.Close.A, y = trainingData$Adj.Close.B, k.min = 0.1, #
+                     k.max = trainingK.max, numK = 100)#
+  test.period = c(train.period[2] + 1, n)#
+  testData = data.frame(Date = stockAB$Date, Adj.Close.A = stockAB$Adj.Close.A, #
+                        Adj.Close.B = stockAB$Adj.Close.B, Ratio = stockAB$Ratio)[#
+                          test.period[1]:test.period[2], ]#
+  profit = getProfit.K(x = testData$Adj.Close.A, y = testData$Adj.Close.B, k = k.star)#
+  return(profit)#
+}#
+#
+simProfitDist = function(..., B = 100)#
+  sapply(1:B, function(i, ...) runSim(...), ...)#
+rhos = seq(.95, .99, by = .01)#
+psis = seq(0, 1, by = .2)#
+beta1.1 = c(0, .05)#
+beta1.2 = c(0, .05)#
+sigmas = c(0.5, 1, 2)#
+#
+simResultsRef = expand.grid(sigmas, beta1.2, beta1.1, psis, rhos)#
+simResultsRef$distribution = rep(1:72, times = 5)#
+#
+# distributionListRho95 = list()#
+# for (i in 1) {#
+#   for (j in 1:length(psis)) {#
+#     for (k in 1:length(beta1.1)) {#
+#       for (l in 1:length(beta1.2)) {#
+#         for (m in 1:length(sigmas)) {#
+#           dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+#                          beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+#                          n = 4000)#
+#           print (head(dist))#
+#           distributionListRho95 = c(distributionListRho95, list(dist))#
+#         }#
+#       }#
+#     }#
+#   }#
+# }#
+# #
+# distributionListRho96 = list()#
+# for (i in 2) {#
+#   for (j in 1:length(psis)) {#
+#     for (k in 1:length(beta1.1)) {#
+#       for (l in 1:length(beta1.2)) {#
+#         for (m in 1:length(sigmas)) {#
+#           dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+#                                beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+#                                n = 4000)#
+#           print (head(dist))#
+#           distributionListRho96 = c(distributionListRho96, list(dist))#
+#         }#
+#       }#
+#     }#
+#   }#
+# }#
+# #
+# distributionListRho97 = list()#
+# for (i in 3) {#
+#   for (j in 1:length(psis)) {#
+#     for (k in 1:length(beta1.1)) {#
+#       for (l in 1:length(beta1.2)) {#
+#         for (m in 1:length(sigmas)) {#
+#           dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+#                                beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+#                                n = 4000)#
+#           print (head(dist))#
+#           distributionListRho97 = c(distributionListRho97, list(dist))#
+#         }#
+#       }#
+#     }#
+#   }#
+# }#
+# #
+# distributionListRho98 = list()#
+# for (i in 4) {#
+#   for (j in 1:length(psis)) {#
+#     for (k in 1:length(beta1.1)) {#
+#       for (l in 1:length(beta1.2)) {#
+#         for (m in 1:length(sigmas)) {#
+#           dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+#                                beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+#                                n = 4000)#
+#           print (head(dist))#
+#           distributionListRho98 = c(distributionListRho98, list(dist))#
+#         }#
+#       }#
+#     }#
+#   }#
+# }#
+#
+distributionListRho99 = list()#
+for (i in 5) {#
+  for (j in 1:length(psis)) {#
+    for (k in 1:length(beta1.1)) {#
+      for (l in 1:length(beta1.2)) {#
+        for (m in 1:length(sigmas)) {#
+          dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+                               beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+                               n = 4000)#
+          print (head(dist))#
+          distributionListRho99 = c(distributionListRho99, list(dist))#
+        }#
+      }#
+    }#
+  }#
+}#
+#
+save(distributionListRho99, file = "simResults99.rda")
+readData = function(fileName, dateFormat = "%m/%d/%y"){#
+  stockData = read.csv(fileName, stringsAsFactors = FALSE)#
+  stockData$Date = as.Date(stockData$Date, dateFormat)#
+  stockData = stockData[order(stockData$Date), ]#
+  return(stockData[ , c("Date", "Adj.Close") ])#
+}#
+#
+combine2stocks = function(stockA, stockB){#
+  stockA = stockA[stockA$Date %in% stockB$Date, ]#
+  stockB = stockB[stockB$Date %in% stockA$Date, ]#
+  stockAB = data.frame(Date = stockA$Date, #
+                       Adj.Close.A = stockA$Adj.Close, #
+                       Adj.Close.B = stockB$Adj.Close, #
+                       Ratio = stockA$Adj.Close / stockB$Adj.Close)#
+  return (stockAB)#
+}#
+#
+plotRatio = function(ratio, k = 1, date = seq(along = ratio), ...){#
+  plot(ratio ~ date, type = "l", xlab = "Date", ylab = "Ratio")#
+  abline(h = mean(ratio), lty = "dashed", col = "green")#
+  abline(h = mean(ratio) - (c(-k, k) * sd(ratio)), lty = "dashed", col = "red")#
+}#
+#
+showPosition = function(pos, ratios, col = c("green", "red"), radius = 100){#
+  symbols(x = pos, y = ratios, circles = rep(radius, times = length(pos)), #
+          fg = col, inches = FALSE, add = TRUE)#
+}#
+#
+findNextPosition = function(ratio, startDay, k = 1, m = mean(ratio), s = sd(ratio)){#
+  possibleOpen = which(abs(ratio - mean(ratio)) >= k * s)#
+  if (length(possibleOpen[possibleOpen >= startDay]) == 0) {#
+    return (integer())#
+  } else {#
+    openPosition = possibleOpen[possibleOpen >= startDay][1]#
+  }#
+  if (ratio[openPosition] >= m + k * s) {#
+    possibleClose = which(ratio <= mean(ratio))#
+    if (length(possibleClose[possibleClose > openPosition]) == 0) {#
+      closePosition = length(ratio)#
+    } else {#
+      closePosition = possibleClose[possibleClose > openPosition][1]#
+    }#
+  }#
+  if (ratio[openPosition] <= m - k * s) {#
+    possibleClose = which(ratio >= mean(ratio))#
+    if (length(possibleClose[possibleClose > openPosition]) == 0) {#
+      closePosition = length(ratio)#
+    } else {#
+      closePosition = possibleClose[possibleClose > openPosition][1]#
+    }#
+  } else {#
+  	closePosition = NA#
+  }#
+  return (nextPosition = c(openPosition, closePosition))#
+}#
+#
+getPositions = function(ratio, startDay, k = 1, m = mean(ratio), s = sd(ratio)){#
+  x = findNextPosition(ratio, startDay, k, m, s)#
+  positions = list(x)#
+  while (x[2] != length(ratio) & !is.na(x[2])){#
+    x = findNextPosition(ratio, startDay = x[2], k, m, s)#
+    positions = c(positions, list(x))#
+  }#
+  return (positions)#
+}#
+#
+positionProfit = function(pos, stockPriceA, stockPriceB, #
+                          m = mean(stockPriceA / stockPriceB)){#
+  unitsA = 1 / stockPriceA[pos[1]]#
+  unitsB = 1 / stockPriceB[pos[1]]#
+  if (stockPriceA[pos[1]] / stockPriceB[pos[1]] > m){#
+    profit = (1 - stockPriceA[pos[2]] * unitsA) + #
+      (stockPriceB[pos[2]] * unitsB - 1)#
+  } else {#
+    profit = (1 - stockPriceB[pos[2]] * unitsB) + #
+      (stockPriceA[pos[2]] * unitsA - 1)#
+  }#
+  return (profit)#
+}#
+#
+getProfit.K = function(x, y, k, m = mean(x/y), s = sd(x/y)){#
+  positions = getPositions(ratio = x / y, startDay = 1, k, m, s)#
+  profit.K = 0#
+  for (i in 1:length(positions)){#
+    if (!is.na(positions[[i]][2])){#
+      profit.i = positionProfit(pos = positions[[i]], stockPriceA = x, #
+                                stockPriceB = y, m = m)#
+      profit.K = profit.K + profit.i#
+    }#
+  }#
+  return (profit.K)#
+}#
+#
+getBest.K = function(x, y, k.min, k.max, numK, m = mean(x/y), s = sd(x/y)){#
+  k.sequence = seq(from = k.min, to = k.max, length = numK)#
+  k.profits = sapply(k.sequence, FUN = getProfit.K, x = x, y = y)#
+  k.star = k.sequence[order(k.profits, decreasing = TRUE)[1]]#
+  return(k.star)#
+}#
+#
+set.seed(100)#
+stockSim = function(n = 4000, rho = 0.99, psi = 0, sigma = rep(1, 2),#
+                    beta0 = rep(100, 2), beta1 = rep(0, 2),#
+                    epsilon = matrix(rnorm(2*n, sd = sigma),#
+                                     nrow = n, byrow = TRUE)){#
+  x1 = numeric(n)#
+  x2 = numeric(n)#
+  x1[1] = 0 + epsilon[1,1]#
+  x2[1] = 0 + epsilon[1,2]#
+  for (i in 2:n) {#
+    x1[i] = rho * x1[i - 1] + psi * (1 - rho) * x2[i - 1] + epsilon[i, 1]#
+    x2[i] = rho * x2[i - 1] + psi * (1 - rho) * x1[i - 1] + epsilon[i, 2]#
+  }#
+  y1 = numeric(n)#
+  y1 = beta0 + beta1 * (1:n) + x1#
+  y2 = numeric(n)#
+  y2 = beta0 + beta1 * (1:n) + x2#
+  return (data.frame(y1, y2))#
+}#
+#
+runSim = function(rho, psi, beta0 = c(100, 100), beta1 = c(0, 0),#
+                  sigma = c(1, 1), n = 4000){#
+  AB = stockSim(n = n, rho = rho, psi = psi, sigma = sigma, #
+                beta0 = beta0, beta1 = beta1, #
+                epsilon = matrix(rnorm(2*n, sd = sigma), #
+                                 nrow = n, byrow = TRUE))#
+  stockA = data.frame(Date = 1:n, Adj.Close = AB[[1]])#
+  stockB = data.frame(Date = 1:n, Adj.Close = AB[[2]])#
+  stockAB = combine2stocks(stockA, stockB)#
+  train.period = c(1, floor(n/2))#
+  trainingData = data.frame(Date = stockAB$Date, Adj.Close.A = stockAB$Adj.Close.A, #
+                            Adj.Close.B = stockAB$Adj.Close.B, Ratio = stockAB$Ratio)[#
+                              train.period[1]:train.period[2], ]#
+  trainingK.max = max(abs(trainingData$Ratio - mean(trainingData$Ratio)) / sd(trainingData$Ratio))#
+  k.star = getBest.K(x = trainingData$Adj.Close.A, y = trainingData$Adj.Close.B, k.min = 0.1, #
+                     k.max = trainingK.max, numK = 100)#
+  test.period = c(train.period[2] + 1, n)#
+  testData = data.frame(Date = stockAB$Date, Adj.Close.A = stockAB$Adj.Close.A, #
+                        Adj.Close.B = stockAB$Adj.Close.B, Ratio = stockAB$Ratio)[#
+                          test.period[1]:test.period[2], ]#
+  profit = getProfit.K(x = testData$Adj.Close.A, y = testData$Adj.Close.B, k = k.star)#
+  return(profit)#
+}#
+#
+simProfitDist = function(..., B = 100)#
+  sapply(1:B, function(i, ...) runSim(...), ...)#
+rhos = seq(.95, .99, by = .01)#
+psis = seq(0, 1, by = .2)#
+beta1.1 = c(0, .05)#
+beta1.2 = c(0, .05)#
+sigmas = c(0.5, 1, 2)#
+#
+simResultsRef = expand.grid(sigmas, beta1.2, beta1.1, psis, rhos)#
+simResultsRef$distribution = rep(1:72, times = 5)#
+#
+# distributionListRho95 = list()#
+# for (i in 1) {#
+#   for (j in 1:length(psis)) {#
+#     for (k in 1:length(beta1.1)) {#
+#       for (l in 1:length(beta1.2)) {#
+#         for (m in 1:length(sigmas)) {#
+#           dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+#                          beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+#                          n = 4000)#
+#           print (head(dist))#
+#           distributionListRho95 = c(distributionListRho95, list(dist))#
+#         }#
+#       }#
+#     }#
+#   }#
+# }#
+# #
+# distributionListRho96 = list()#
+# for (i in 2) {#
+#   for (j in 1:length(psis)) {#
+#     for (k in 1:length(beta1.1)) {#
+#       for (l in 1:length(beta1.2)) {#
+#         for (m in 1:length(sigmas)) {#
+#           dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+#                                beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+#                                n = 4000)#
+#           print (head(dist))#
+#           distributionListRho96 = c(distributionListRho96, list(dist))#
+#         }#
+#       }#
+#     }#
+#   }#
+# }#
+# #
+# distributionListRho97 = list()#
+# for (i in 3) {#
+#   for (j in 1:length(psis)) {#
+#     for (k in 1:length(beta1.1)) {#
+#       for (l in 1:length(beta1.2)) {#
+#         for (m in 1:length(sigmas)) {#
+#           dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+#                                beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+#                                n = 4000)#
+#           print (head(dist))#
+#           distributionListRho97 = c(distributionListRho97, list(dist))#
+#         }#
+#       }#
+#     }#
+#   }#
+# }#
+# #
+# distributionListRho98 = list()#
+# for (i in 4) {#
+#   for (j in 1:length(psis)) {#
+#     for (k in 1:length(beta1.1)) {#
+#       for (l in 1:length(beta1.2)) {#
+#         for (m in 1:length(sigmas)) {#
+#           dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+#                                beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+#                                n = 4000)#
+#           print (head(dist))#
+#           distributionListRho98 = c(distributionListRho98, list(dist))#
+#         }#
+#       }#
+#     }#
+#   }#
+# }#
+#
+distributionListRho99 = list()#
+for (i in 5) {#
+  for (j in 1:length(psis)) {#
+    for (k in 1:length(beta1.1)) {#
+      for (l in 1:length(beta1.2)) {#
+        for (m in 1:length(sigmas)) {#
+          dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+                               beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+                               n = 4000)#
+          print (head(dist))#
+          distributionListRho99 = c(distributionListRho99, list(dist))#
+        }#
+      }#
+    }#
+  }#
+}#
+#
+save(distributionListRho99, file = "simResults99.rda")
+readData = function(fileName, dateFormat = "%m/%d/%y"){#
+  stockData = read.csv(fileName, stringsAsFactors = FALSE)#
+  stockData$Date = as.Date(stockData$Date, dateFormat)#
+  stockData = stockData[order(stockData$Date), ]#
+  return(stockData[ , c("Date", "Adj.Close") ])#
+}#
+#
+combine2stocks = function(stockA, stockB){#
+  stockA = stockA[stockA$Date %in% stockB$Date, ]#
+  stockB = stockB[stockB$Date %in% stockA$Date, ]#
+  stockAB = data.frame(Date = stockA$Date, #
+                       Adj.Close.A = stockA$Adj.Close, #
+                       Adj.Close.B = stockB$Adj.Close, #
+                       Ratio = stockA$Adj.Close / stockB$Adj.Close)#
+  return (stockAB)#
+}#
+#
+plotRatio = function(ratio, k = 1, date = seq(along = ratio), ...){#
+  plot(ratio ~ date, type = "l", xlab = "Date", ylab = "Ratio")#
+  abline(h = mean(ratio), lty = "dashed", col = "green")#
+  abline(h = mean(ratio) - (c(-k, k) * sd(ratio)), lty = "dashed", col = "red")#
+}#
+#
+showPosition = function(pos, ratios, col = c("green", "red"), radius = 100){#
+  symbols(x = pos, y = ratios, circles = rep(radius, times = length(pos)), #
+          fg = col, inches = FALSE, add = TRUE)#
+}#
+#
+findNextPosition = function(ratio, startDay, k = 1, m = mean(ratio), s = sd(ratio)){#
+  possibleOpen = which(abs(ratio - mean(ratio)) >= k * s)#
+  if (length(possibleOpen[possibleOpen >= startDay]) == 0) {#
+    return (integer())#
+  } else {#
+    openPosition = possibleOpen[possibleOpen >= startDay][1]#
+  }#
+  if (ratio[openPosition] >= m + k * s) {#
+    possibleClose = which(ratio <= mean(ratio))#
+    if (length(possibleClose[possibleClose > openPosition]) == 0) {#
+      closePosition = length(ratio)#
+    } else {#
+      closePosition = possibleClose[possibleClose > openPosition][1]#
+    }#
+  }#
+  if (ratio[openPosition] <= m - k * s) {#
+    possibleClose = which(ratio >= mean(ratio))#
+    if (length(possibleClose[possibleClose > openPosition]) == 0) {#
+      closePosition = length(ratio)#
+    } else {#
+      closePosition = possibleClose[possibleClose > openPosition][1]#
+    }#
+  } #
+  return (nextPosition = c(openPosition, closePosition))#
+}#
+#
+getPositions = function(ratio, startDay, k = 1, m = mean(ratio), s = sd(ratio)){#
+  x = findNextPosition(ratio, startDay, k, m, s)#
+  positions = list(x)#
+  while (x[2] != length(ratio) & !is.na(x[2])){#
+    x = findNextPosition(ratio, startDay = x[2], k, m, s)#
+    positions = c(positions, list(x))#
+  }#
+  return (positions)#
+}#
+#
+positionProfit = function(pos, stockPriceA, stockPriceB, #
+                          m = mean(stockPriceA / stockPriceB)){#
+  unitsA = 1 / stockPriceA[pos[1]]#
+  unitsB = 1 / stockPriceB[pos[1]]#
+  if (stockPriceA[pos[1]] / stockPriceB[pos[1]] > m){#
+    profit = (1 - stockPriceA[pos[2]] * unitsA) + #
+      (stockPriceB[pos[2]] * unitsB - 1)#
+  } else {#
+    profit = (1 - stockPriceB[pos[2]] * unitsB) + #
+      (stockPriceA[pos[2]] * unitsA - 1)#
+  }#
+  return (profit)#
+}#
+#
+getProfit.K = function(x, y, k, m = mean(x/y), s = sd(x/y)){#
+  positions = getPositions(ratio = x / y, startDay = 1, k, m, s)#
+  profit.K = 0#
+  for (i in 1:length(positions)){#
+    if (!is.na(positions[[i]][2])){#
+      profit.i = positionProfit(pos = positions[[i]], stockPriceA = x, #
+                                stockPriceB = y, m = m)#
+      profit.K = profit.K + profit.i#
+    }#
+  }#
+  return (profit.K)#
+}#
+#
+getBest.K = function(x, y, k.min, k.max, numK, m = mean(x/y), s = sd(x/y)){#
+  k.sequence = seq(from = k.min, to = k.max, length = numK)#
+  k.profits = sapply(k.sequence, FUN = getProfit.K, x = x, y = y)#
+  k.star = k.sequence[order(k.profits, decreasing = TRUE)[1]]#
+  return(k.star)#
+}#
+#
+set.seed(100)#
+stockSim = function(n = 4000, rho = 0.99, psi = 0, sigma = rep(1, 2),#
+                    beta0 = rep(100, 2), beta1 = rep(0, 2),#
+                    epsilon = matrix(rnorm(2*n, sd = sigma),#
+                                     nrow = n, byrow = TRUE)){#
+  x1 = numeric(n)#
+  x2 = numeric(n)#
+  x1[1] = 0 + epsilon[1,1]#
+  x2[1] = 0 + epsilon[1,2]#
+  for (i in 2:n) {#
+    x1[i] = rho * x1[i - 1] + psi * (1 - rho) * x2[i - 1] + epsilon[i, 1]#
+    x2[i] = rho * x2[i - 1] + psi * (1 - rho) * x1[i - 1] + epsilon[i, 2]#
+  }#
+  y1 = numeric(n)#
+  y1 = beta0 + beta1 * (1:n) + x1#
+  y2 = numeric(n)#
+  y2 = beta0 + beta1 * (1:n) + x2#
+  return (data.frame(y1, y2))#
+}#
+#
+runSim = function(rho, psi, beta0 = c(100, 100), beta1 = c(0, 0),#
+                  sigma = c(1, 1), n = 4000){#
+  AB = stockSim(n = n, rho = rho, psi = psi, sigma = sigma, #
+                beta0 = beta0, beta1 = beta1, #
+                epsilon = matrix(rnorm(2*n, sd = sigma), #
+                                 nrow = n, byrow = TRUE))#
+  stockA = data.frame(Date = 1:n, Adj.Close = AB[[1]])#
+  stockB = data.frame(Date = 1:n, Adj.Close = AB[[2]])#
+  stockAB = combine2stocks(stockA, stockB)#
+  train.period = c(1, floor(n/2))#
+  trainingData = data.frame(Date = stockAB$Date, Adj.Close.A = stockAB$Adj.Close.A, #
+                            Adj.Close.B = stockAB$Adj.Close.B, Ratio = stockAB$Ratio)[#
+                              train.period[1]:train.period[2], ]#
+  trainingK.max = max(abs(trainingData$Ratio - mean(trainingData$Ratio)) / sd(trainingData$Ratio))#
+  k.star = getBest.K(x = trainingData$Adj.Close.A, y = trainingData$Adj.Close.B, k.min = 0.1, #
+                     k.max = trainingK.max, numK = 100)#
+  test.period = c(train.period[2] + 1, n)#
+  testData = data.frame(Date = stockAB$Date, Adj.Close.A = stockAB$Adj.Close.A, #
+                        Adj.Close.B = stockAB$Adj.Close.B, Ratio = stockAB$Ratio)[#
+                          test.period[1]:test.period[2], ]#
+  profit = getProfit.K(x = testData$Adj.Close.A, y = testData$Adj.Close.B, k = k.star)#
+  return(profit)#
+}#
+#
+simProfitDist = function(..., B = 100)#
+  sapply(1:B, function(i, ...) runSim(...), ...)#
+rhos = seq(.95, .99, by = .01)#
+psis = seq(0, 1, by = .2)#
+beta1.1 = c(0, .05)#
+beta1.2 = c(0, .05)#
+sigmas = c(0.5, 1, 2)#
+#
+simResultsRef = expand.grid(sigmas, beta1.2, beta1.1, psis, rhos)#
+simResultsRef$distribution = rep(1:72, times = 5)#
+#
+# distributionListRho95 = list()#
+# for (i in 1) {#
+#   for (j in 1:length(psis)) {#
+#     for (k in 1:length(beta1.1)) {#
+#       for (l in 1:length(beta1.2)) {#
+#         for (m in 1:length(sigmas)) {#
+#           dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+#                          beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+#                          n = 4000)#
+#           print (head(dist))#
+#           distributionListRho95 = c(distributionListRho95, list(dist))#
+#         }#
+#       }#
+#     }#
+#   }#
+# }#
+# #
+# distributionListRho96 = list()#
+# for (i in 2) {#
+#   for (j in 1:length(psis)) {#
+#     for (k in 1:length(beta1.1)) {#
+#       for (l in 1:length(beta1.2)) {#
+#         for (m in 1:length(sigmas)) {#
+#           dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+#                                beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+#                                n = 4000)#
+#           print (head(dist))#
+#           distributionListRho96 = c(distributionListRho96, list(dist))#
+#         }#
+#       }#
+#     }#
+#   }#
+# }#
+# #
+# distributionListRho97 = list()#
+# for (i in 3) {#
+#   for (j in 1:length(psis)) {#
+#     for (k in 1:length(beta1.1)) {#
+#       for (l in 1:length(beta1.2)) {#
+#         for (m in 1:length(sigmas)) {#
+#           dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+#                                beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+#                                n = 4000)#
+#           print (head(dist))#
+#           distributionListRho97 = c(distributionListRho97, list(dist))#
+#         }#
+#       }#
+#     }#
+#   }#
+# }#
+# #
+# distributionListRho98 = list()#
+# for (i in 4) {#
+#   for (j in 1:length(psis)) {#
+#     for (k in 1:length(beta1.1)) {#
+#       for (l in 1:length(beta1.2)) {#
+#         for (m in 1:length(sigmas)) {#
+#           dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+#                                beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+#                                n = 4000)#
+#           print (head(dist))#
+#           distributionListRho98 = c(distributionListRho98, list(dist))#
+#         }#
+#       }#
+#     }#
+#   }#
+# }#
+#
+distributionListRho99 = list()#
+for (i in 5) {#
+  for (j in 1:length(psis)) {#
+    for (k in 1:length(beta1.1)) {#
+      for (l in 1:length(beta1.2)) {#
+        for (m in 1:length(sigmas)) {#
+          dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+                               beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+                               n = 4000)#
+          print (head(dist))#
+          distributionListRho99 = c(distributionListRho99, list(dist))#
+        }#
+      }#
+    }#
+  }#
+}#
+#
+save(distributionListRho99, file = "simResults99.rda")
+distributionListRho99
+add = simProfitDist(rho = .99, psi = .2, beta1 = c(0, 0.05), sigma = c(2,2))
+distributionListRho96 = c(distributionListRho99, list(add))
+distributionListRho99 = c(distributionListRho99, list(add))
+distributionListRho99
+for (i in 5) {#
+  for (j in 2:length(psis)) {#
+    for (k in 2:length(beta1.1)) {#
+      for (l in 1:length(beta1.2)) {#
+        for (m in 1:length(sigmas)) {#
+          dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+                               beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+                               n = 4000)#
+          print (head(dist))#
+          distributionListRho99 = c(distributionListRho99, list(dist))#
+        }#
+      }#
+    }#
+  }
+}
+distributionListRho99
+add = simProfitDist(rho = .99, psi = .6, beta1 = c(0, 0), sigma = c(2,2))
+distributionListRho99 = c(distributionListRho99, list(add))
+distributionListRho99
+distributionListRho99[-(37:39)]
+distributionListRho99 = distributionListRho99[-(37:39)]
+for (i in 5) {#
+  for (j in 3:length(psis)) {#
+    for (k in 1:length(beta1.1)) {#
+      for (l in 1:length(beta1.2)) {#
+        for (m in 1:length(sigmas)) {#
+          dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+                               beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+                               n = 4000)#
+          print (head(dist))#
+          distributionListRho99 = c(distributionListRho99, list(dist))#
+        }#
+      }#
+    }#
+  }
+}
+add = simProfitDist(rho = .99, psi = .6, beta1 = c(0, 0), sigma = c(2,2))
+distributionListRho99 = c(distributionListRho99, list(add))
+add = simProfitDist(rho = .99, psi = .6, beta1 = c(0, .05), sigma c(0.5,0.5))#
+distributionListRho99 = c(distributionListRho99, list(add))
+distributionListRho99
+distributionListRho99 = distributionListRho99[-40]
+add = simProfitDist(rho = .99, psi = .6, beta1 = c(0, 0), sigma = c(2,2))#
+distributionListRho99 = c(distributionListRho99, list(add))
+distributionListRho99
+distributionListRho99 = distributionListRho99[-40]
+add = simProfitDist(rho = .99, psi = .6, beta1 = c(0, .05), sigma = c(0.5,0.5))#
+distributionListRho99 = c(distributionListRho99, list(add))
+add = simProfitDist(rho = .99, psi = .6, beta1 = c(0, .05), sigma = c(1,1))#
+distributionListRho99 = c(distributionListRho99, list(add))
+add = simProfitDist(rho = .99, psi = .6, beta1 = c(0, .05), sigma = c(2,2))#
+distributionListRho99 = c(distributionListRho99, list(add))
+distributionListRho99
+add = simProfitDist(rho = .99, psi = .6, beta1 = c(.5, 0), sigma = c(0.5,0.5))#
+distributionListRho99 = c(distributionListRho99, list(add))
+distributionListRho99
+distributionListRho99 = distributionListRho99[-43]
+add = simProfitDist(rho = .99, psi = .6, beta1 = c(.05, 0), sigma = c(0.5,0.5))#
+distributionListRho99 = c(distributionListRho99, list(add))
+add = simProfitDist(rho = .99, psi = .6, beta1 = c(.05, 0), sigma = c(1,1))#
+distributionListRho99 = c(distributionListRho99, list(add))
+add = simProfitDist(rho = .99, psi = .6, beta1 = c(.05, 0), sigma = c(2,2))#
+distributionListRho99 = c(distributionListRho99, list(add))
+distributionListRho99
+distributionListRho99 = distributionListRho99[-(45:46)]
+add = simProfitDist(rho = .99, psi = .6, beta1 = c(.05, 0), sigma = c(2,2))
+distributionListRho99 = c(distributionListRho99, list(add))
+add = simProfitDist(rho = .99, psi = .6, beta1 = c(.05, 0.5), sigma = c(0.5,0.5))#
+distributionListRho99 = c(distributionListRho99, list(add))
+add = simProfitDist(rho = .99, psi = .6, beta1 = c(.05, 0.5), sigma = c(1,1))#
+distributionListRho99 = c(distributionListRho99, list(add))
+add = simProfitDist(rho = .99, psi = .6, beta1 = c(.05, 0.5), sigma = c(2,2))#
+distributionListRho99 = c(distributionListRho99, list(add))
+for (i in 5) {#
+  for (j in 5) {#
+    for (k in 1:length(beta1.1)) {#
+      for (l in 1:length(beta1.2)) {#
+        for (m in 1:length(sigmas)) {#
+          dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+                               beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+                               n = 4000)#
+          print (head(dist))#
+          distributionListRho99 = c(distributionListRho99, list(dist))#
+        }#
+      }#
+    }#
+  }#
+}
+distributionListRho99
+add = simProfitDist(rho = .99, psi = .8, beta1 = c(0, 0.5), sigma = c(2,2))
+distributionListRho99 = c(distributionListRho99, list(add))
+add = simProfitDist(rho = .99, psi = .8, beta1 = c(.05, 0), sigma = c(0.5,0.5))#
+distributionListRho99 = c(distributionListRho99, list(add))
+add = simProfitDist(rho = .99, psi = .8, beta1 = c(.05, 0), sigma = c(1,1))#
+distributionListRho99 = c(distributionListRho99, list(add))
+add = simProfitDist(rho = .99, psi = .8, beta1 = c(.05, 0), sigma = c(2,2))#
+distributionListRho99 = c(distributionListRho99, list(add))
+add = simProfitDist(rho = .99, psi = .8, beta1 = c(.05, 0.5), sigma = c(0.5,0.5))#
+distributionListRho99 = c(distributionListRho99, list(add))
+add = simProfitDist(rho = .99, psi = .8, beta1 = c(.05, 0.5), sigma = c(1,1))#
+distributionListRho99 = c(distributionListRho99, list(add))
+add = simProfitDist(rho = .99, psi = .8, beta1 = c(.05, 0.5), sigma = c(2,2))#
+distributionListRho99 = c(distributionListRho99, list(add))
+distributionListRho99
+save(distributionListRho99, file = "simResults99.rda")
+load("/Users/Skyroh/Documents/Stat 133/Project_PairsTrading/simResults99.rda")
+distributionListRho99
+xyz = length(1:10)
+xy = xyz > 8
+xy
+xy = xyz[xyz > 8]
+xy
+xy = xyz[xyz > 8]
+xyz[xyz > 8]
+xyz = 1:10
+xy = xyz > 8
+xy
+xyz[xyz > 8]
+close = xyz[xyz < 4]
+xlose
+close
+close[close > 10]
+close[close > 10] == 0
+length(close[close > 10]) == 0
+length(which(close > 10)) == 0
+which(close > 10)
+load("/Users/Skyroh/Documents/Stat 133/Project_PairsTrading/simResults.rda")
+distributionListRho99
+readData = function(fileName, dateFormat = "%m/%d/%y"){#
+  stockData = read.csv(fileName, stringsAsFactors = FALSE)#
+  stockData$Date = as.Date(stockData$Date, dateFormat)#
+  stockData = stockData[order(stockData$Date), ]#
+  return(stockData[ , c("Date", "Adj.Close") ])#
+}#
+#
+combine2stocks = function(stockA, stockB){#
+  stockA = stockA[stockA$Date %in% stockB$Date, ]#
+  stockB = stockB[stockB$Date %in% stockA$Date, ]#
+  stockAB = data.frame(Date = stockA$Date, #
+                       Adj.Close.A = stockA$Adj.Close, #
+                       Adj.Close.B = stockB$Adj.Close, #
+                       Ratio = stockA$Adj.Close / stockB$Adj.Close)#
+  return (stockAB)#
+}#
+#
+plotRatio = function(ratio, k = 1, date = seq(along = ratio), ...){#
+  plot(ratio ~ date, type = "l", xlab = "Date", ylab = "Ratio")#
+  abline(h = mean(ratio), lty = "dashed", col = "green")#
+  abline(h = mean(ratio) - (c(-k, k) * sd(ratio)), lty = "dashed", col = "red")#
+}#
+#
+showPosition = function(pos, ratios, col = c("green", "red"), radius = 100){#
+  symbols(x = pos, y = ratios, circles = rep(radius, times = length(pos)), #
+          fg = col, inches = FALSE, add = TRUE)#
+}#
+#
+findNextPosition = function(ratio, startDay, k = 1, m = mean(ratio), s = sd(ratio)){#
+  openPosition = c()#
+  closePosition = c()#
+  possibleOpen = which(abs(ratio - m) >= k * s)#
+  if (length(possibleOpen[possibleOpen >= startDay]) == 0) {#
+    return (integer())#
+  } else {#
+    openPosition = possibleOpen[possibleOpen >= startDay][1]#
+  }#
+  if (ratio[openPosition] >= m + k * s) {#
+    possibleClose = which(ratio <= m)#
+    if (length(possibleClose[possibleClose > openPosition]) == 0) {#
+      closePosition = length(ratio)#
+    } else {#
+      closePosition = possibleClose[possibleClose > openPosition][1]#
+    }#
+  }#
+  if (ratio[openPosition] <= m - k * s) {#
+    possibleClose = which(ratio >= m)#
+    if (length(possibleClose[possibleClose > openPosition]) == 0) {#
+      closePosition = length(ratio)#
+    } else {#
+      closePosition = possibleClose[possibleClose > openPosition][1]#
+    }#
+  }#
+  return (nextPosition = c(openPosition, closePosition))#
+}#
+#
+getPositions = function(ratio, startDay, k = 1, m = mean(ratio), s = sd(ratio)){#
+  x = findNextPosition(ratio, startDay, k, m, s)#
+  positions = list(x)#
+  while (x[2] != length(ratio) & !is.na(x[2])){#
+    x = findNextPosition(ratio, startDay = x[2], k, m, s)#
+    positions = c(positions, list(x))#
+  }#
+  return (positions)#
+}#
+#
+positionProfit = function(pos, stockPriceA, stockPriceB, #
+                          m = mean(stockPriceA / stockPriceB)){#
+  unitsA = 1 / stockPriceA[pos[1]]#
+  unitsB = 1 / stockPriceB[pos[1]]#
+  if (stockPriceA[pos[1]] / stockPriceB[pos[1]] > m){#
+    profit = (1 - stockPriceA[pos[2]] * unitsA) + #
+      (stockPriceB[pos[2]] * unitsB - 1)#
+  } else {#
+    profit = (1 - stockPriceB[pos[2]] * unitsB) + #
+      (stockPriceA[pos[2]] * unitsA - 1)#
+  }#
+  return (profit)#
+}#
+#
+getProfit.K = function(x, y, k, m = mean(x/y), s = sd(x/y)){#
+  positions = getPositions(ratio = x / y, startDay = 1, k, m, s)#
+  profit.K = 0#
+  for (i in 1:length(positions)){#
+    if (!is.na(positions[[i]][2])){#
+      profit.i = positionProfit(pos = positions[[i]], stockPriceA = x, #
+                                stockPriceB = y, m = m)#
+      profit.K = profit.K + profit.i#
+    }#
+  }#
+  return (profit.K)#
+}#
+#
+getBest.K = function(x, y, k.min, k.max, numK, m = mean(x/y), s = sd(x/y)){#
+  k.sequence = seq(from = k.min, to = k.max, length = numK)#
+  k.profits = sapply(k.sequence, FUN = getProfit.K, x = x, y = y)#
+  k.star = k.sequence[order(k.profits, decreasing = TRUE)[1]]#
+  return(k.star)#
+}#
+#
+set.seed(100)#
+stockSim = function(n = 4000, rho = 0.99, psi = 0, sigma = rep(1, 2),#
+                    beta0 = rep(100, 2), beta1 = rep(0, 2),#
+                    epsilon = matrix(rnorm(2*n, sd = sigma),#
+                                     nrow = n, byrow = TRUE)){#
+  x1 = numeric(n)#
+  x2 = numeric(n)#
+  x1[1] = 0 + epsilon[1,1]#
+  x2[1] = 0 + epsilon[1,2]#
+  for (i in 2:n) {#
+    x1[i] = rho * x1[i - 1] + psi * (1 - rho) * x2[i - 1] + epsilon[i, 1]#
+    x2[i] = rho * x2[i - 1] + psi * (1 - rho) * x1[i - 1] + epsilon[i, 2]#
+  }#
+  y1 = numeric(n)#
+  y1 = beta0 + beta1 * (1:n) + x1#
+  y2 = numeric(n)#
+  y2 = beta0 + beta1 * (1:n) + x2#
+  return (data.frame(y1, y2))#
+}#
+#
+runSim = function(rho, psi, beta0 = c(100, 100), beta1 = c(0, 0),#
+                  sigma = c(1, 1), n = 4000){#
+  AB = stockSim(n = n, rho = rho, psi = psi, sigma = sigma, #
+                beta0 = beta0, beta1 = beta1, #
+                epsilon = matrix(rnorm(2*n, sd = sigma), #
+                                 nrow = n, byrow = TRUE))#
+  stockA = data.frame(Date = 1:n, Adj.Close = AB[[1]])#
+  stockB = data.frame(Date = 1:n, Adj.Close = AB[[2]])#
+  stockAB = combine2stocks(stockA, stockB)#
+  train.period = c(1, floor(n/2))#
+  trainingData = data.frame(Date = stockAB$Date, Adj.Close.A = stockAB$Adj.Close.A, #
+                            Adj.Close.B = stockAB$Adj.Close.B, Ratio = stockAB$Ratio)[#
+                              train.period[1]:train.period[2], ]#
+  trainingK.max = max(abs(trainingData$Ratio - mean(trainingData$Ratio)) / sd(trainingData$Ratio))#
+  k.star = getBest.K(x = trainingData$Adj.Close.A, y = trainingData$Adj.Close.B, k.min = 0.1, #
+                     k.max = trainingK.max, numK = 100)#
+  test.period = c(train.period[2] + 1, n)#
+  testData = data.frame(Date = stockAB$Date, Adj.Close.A = stockAB$Adj.Close.A, #
+                        Adj.Close.B = stockAB$Adj.Close.B, Ratio = stockAB$Ratio)[#
+                          test.period[1]:test.period[2], ]#
+  profit = getProfit.K(x = testData$Adj.Close.A, y = testData$Adj.Close.B, k = k.star)#
+  return(profit)#
+}#
+#
+simProfitDist = function(..., B = 100)#
+  sapply(1:B, function(i, ...) runSim(...), ...)
+rhos = seq(.95, .99, by = .01)#
+psis = seq(0, .8, by = .2)#
+beta1.1 = c(0, .05)#
+beta1.2 = c(0, .05)#
+sigmas = c(0.5, 1, 1.5)#
+#
+simResultsRef = expand.grid(sigmas, beta1.2, beta1.1, psis, rhos)#
+simResultsRef$distribution = 1:300#
+#
+distributionList = list()#
+for (i in 1:length(rhos)) {#
+  for (j in 1:length(psis)) {#
+    for (k in 1:length(beta1.1)) {#
+      for (l in 1:length(beta1.2)) {#
+        for (m in 1:length(sigmas)) {#
+          dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+                               beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+                               n = 4000)#
+          distributionList = c(distributionList, list(dist))#
+        }#
+      }#
+    }#
+  }#
+}#
+#
+save(simResultsRef, distributionList, #
+     file = "simResultsAll.rda")#
+#
+distributionListRho95 = list()#
+for (i in 1) {#
+  for (j in 1:length(psis)) {#
+    for (k in 1:length(beta1.1)) {#
+      for (l in 1:length(beta1.2)) {#
+        for (m in 1:length(sigmas)) {#
+          dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+                         beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+                         n = 4000)#
+          print (head(dist))#
+          distributionListRho95 = c(distributionListRho95, list(dist))#
+        }#
+      }#
+    }#
+  }#
+}#
+#
+distributionListRho96 = list()#
+for (i in 2) {#
+  for (j in 1:length(psis)) {#
+    for (k in 1:length(beta1.1)) {#
+      for (l in 1:length(beta1.2)) {#
+        for (m in 1:length(sigmas)) {#
+          dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+                               beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+                               n = 4000)#
+          print (head(dist))#
+          distributionListRho96 = c(distributionListRho96, list(dist))#
+        }#
+      }#
+    }#
+  }#
+}#
+#
+distributionListRho97 = list()#
+for (i in 3) {#
+  for (j in 1:length(psis)) {#
+    for (k in 1:length(beta1.1)) {#
+      for (l in 1:length(beta1.2)) {#
+        for (m in 1:length(sigmas)) {#
+          dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+                               beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+                               n = 4000)#
+          print (head(dist))#
+          distributionListRho97 = c(distributionListRho97, list(dist))#
+        }#
+      }#
+    }#
+  }#
+}#
+#
+distributionListRho98 = list()#
+for (i in 4) {#
+  for (j in 1:length(psis)) {#
+    for (k in 1:length(beta1.1)) {#
+      for (l in 1:length(beta1.2)) {#
+        for (m in 1:length(sigmas)) {#
+          dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+                               beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+                               n = 4000)#
+          print (head(dist))#
+          distributionListRho98 = c(distributionListRho98, list(dist))#
+        }#
+      }#
+    }#
+  }#
+}#
+#
+distributionListRho99 = list()#
+for (i in 5) {#
+  for (j in 1:length(psis)) {#
+    for (k in 1:length(beta1.1)) {#
+      for (l in 1:length(beta1.2)) {#
+        for (m in 1:length(sigmas)) {#
+          dist = simProfitDist(rho = rhos[i], psi = psis[j],beta0 = c(100, 100), #
+                               beta1 = c(beta1.1[k], beta1.2[l]), sigma = c(sigmas[m], sigmas[m]), #
+                               n = 4000)#
+          print (head(dist))#
+          distributionListRho99 = c(distributionListRho99, list(dist))#
+        }#
+      }#
+    }#
+  }#
+}#
+#
+save(simResultsRef, distributionListRho95, distributionListRho96, #
+     distributionListRho97, distributionListRho98, distributionListRho99, #
+     file = "simResults.rda")
+load("/Users/Skyroh/Documents/Stat 133/Project_PairsTrading/simResultsAll.rda")

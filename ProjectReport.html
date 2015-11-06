@@ -2,14 +2,22 @@
 
 <head>
 <style type="text/css">
+<<<<<<< HEAD
 .knitr .inline {
+=======
+.knitr.inline {
+>>>>>>> b4c1a83ece22c3593fa6b72c37da746abca4235a
   background-color: #f7f7f7;
   border:solid 1px #B0B0B0;
 }
 .error {
 	font-weight: bold;
 	color: #FF0000;
+<<<<<<< HEAD
 }
+=======
+},
+>>>>>>> b4c1a83ece22c3593fa6b72c37da746abca4235a
 .warning {
 	font-weight: bold;
 }
@@ -17,12 +25,17 @@
 	font-style: italic;
 }
 .source, .output, .warning, .error, .message {
+<<<<<<< HEAD
 	padding: 0 1em;
+=======
+	padding: 0em 1em;
+>>>>>>> b4c1a83ece22c3593fa6b72c37da746abca4235a
   border:solid 1px #F7F7F7;
 }
 .source {
   background-color: #f5f5f5;
 }
+<<<<<<< HEAD
 .rimage .left {
   text-align: left;
 }
@@ -30,6 +43,15 @@
   text-align: right;
 }
 .rimage .center {
+=======
+.rimage.left {
+  text-align: left;
+}
+.rimage.right {
+  text-align: right;
+}
+.rimage.center {
+>>>>>>> b4c1a83ece22c3593fa6b72c37da746abca4235a
   text-align: center;
 }
 .hl.num {
@@ -73,7 +95,11 @@
 <h2>Introduction</h2>
 
 <p>
+<<<<<<< HEAD
 The economy revolves around finance and financial trading. To maximize profits in buying and selling stock, it is vital to have algorithms and models to predict opportunities and strategies to implement at such moments. Pairs trading is one such method that attempts to automate such a process. Its implementation on tens of thousands simulated time series exhibits that it is most effective when the dependence (cross-correlation of short time lags) between two stocks is high. 
+=======
+The economy revolves around finance and financial trading. To maximize profits in buying and selling stock, it is vital to have algorithms and models to predict opportunities and strategies to implement at such moments. Pairs trading is one such method that attempts to automate such a process. Its implementation on tens of thousands simulated time series exhibits that it is most effective when dependence between two stocks is high. 
+>>>>>>> b4c1a83ece22c3593fa6b72c37da746abca4235a
 </p>
 
 <h2>Background</h2>
@@ -82,6 +108,7 @@ The economy revolves around finance and financial trading. To maximize profits i
 Pairs trading is a early model of stock trading that was at the peak of use in the 80s. It established that the ratio of stock prices of similar companies tends to stay consistent. Variations from the mean are then opportunities for profit since the model predicts that the direction of the ratio will tend back towards the mean. Past historical data for the two companies is used to establish the magnitude of variation at which to buy and sell.  
 </p>
 
+<<<<<<< HEAD
 <h2>Methods</h2>
 
 <p>
@@ -103,6 +130,16 @@ Empirical data is based on daily closing prices of 14 publicly traded companies 
 </p>
 <p>
 One of the notable trends was that stocks that have mean ratios far from 1 (Hotels - Hilton and Hyatt) tend to have lower profit margins compared to stocks of similar value, i.e. ratio ~ 1 (Airlines - Southwest and United). Additionally, stocks with few trading positions, but peaks of high magnitude, showed greater profits than those with more positions but less deviation (Industry vs Cars).
+=======
+<h2>Empirical Study</h2>
+
+<p>
+To test the functionality of the pairs trading model created, I compared six pairs of stocks from companies of similar industries. The two companies that are compared need to be of the same industry in order to reasonably make the assumption that the ratio of their stock prices will converge to a central value.   
+</p>
+<p>
+One of the notable trends was that stocks that have mean ratios far from 1 (Hotels - Hilton and Hyatt) tend to low profit margins compared to stocks of similar value, i.e. ratio ~ 1 (Airlines - Southwest and United). Additionally, stocks with few positions, but peaks of high magnitude, showed greater profits than those with more positions but less deviation (Industry vs Cars).
+*all calculated profits are based on $1 worth of stock bought and sold at each opening position*
+>>>>>>> b4c1a83ece22c3593fa6b72c37da746abca4235a
 </p>
 
 
@@ -115,7 +152,11 @@ One of the notable trends was that stocks that have mean ratios far from 1 (Hote
  
 <p/>
 <p>
+<<<<<<< HEAD
 --- Difference in deviation from mean: frequency and magnitude
+=======
+--- Difference in deviation from mean, frequency and magnitude
+>>>>>>> b4c1a83ece22c3593fa6b72c37da746abca4235a
 </p>
 <div class="chunk" id="unnamed-chunk-3"><div class="rimage default"><img src="figure/unnamed-chunk-3-1.png" title="plot of chunk unnamed-chunk-3" alt="plot of chunk unnamed-chunk-3" class="plot" /></div></div>
 
@@ -171,7 +212,11 @@ Similulations of hypothetical time series were created based on 8 parameters: rh
 <h2>Conclusions</h2>
 
 <p>
+<<<<<<< HEAD
   The model of pairs trading excels when the two stocks under examination exhibit a great dependence on one another. The dependence of two companies drives the ratio of their prices towards a long-run average which in turn effects the number of buy and sell opportunities, which correspond to opportunities to profit, and possibly more importantly, reduces probability of a long-term loss by segmenting risk into short lower risk profit opportunities. 
+=======
+The model of pairs trading excels when the two stocks under examination exhibit a great dependence on one another. The dependence of the two companies effects the number of buy and sell opportunities, which correspond to opportunities to profit, and possibly more importantly, prevent much possibility for loss. 
+>>>>>>> b4c1a83ece22c3593fa6b72c37da746abca4235a
 </p>
 
 </body>
